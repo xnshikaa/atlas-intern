@@ -1,1 +1,0 @@
-# Example: HR Automation backend
