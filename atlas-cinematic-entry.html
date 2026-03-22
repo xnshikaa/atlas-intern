@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Atlas Faculty Command Centre - Cinematic Entry</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;800&display=swap');
+
+    :root {
+      --atlas-red: #D32B2B;
+      --atlas-blue: #0d1b3e;
+      --text-main: #ffffff;
+      --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      font-family: 'Syne', sans-serif;
+      background: var(--atlas-blue);
+      overflow: hidden;
+      perspective: 1200px;
+      color: var(--text-main);
+    }
+    
+    /* 1. Liquid Colour Wash */
+    .liquid-wash {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--atlas-red);
+      z-index: 9999;
+      transform-origin: right;
+      /* Starts fully covering the screen */
+      clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+      transition: clip-path 1.4s cubic-bezier(0.77, 0, 0.175, 1);
+    }
+    .liquid-wash.wipe {
+      /* Wipes away to the right exposing the background */
+      clip-path: polygon(100% 0, 100% 0, 100% 100%, 100% 100%);
+    }
+
+    /* 2. Particle Burst & Logo Container */
+    .intro-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9000;
+      background: var(--atlas-blue);
+      transition: opacity 0.8s ease, visibility 0.8s ease;
+    }
+    .intro-screen.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      pointer-events: none;
+    }
+    
+    .atlas-logo {
+      font-size: 6rem;
+      font-weight: 800;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      z-index: 2;
+      opacity: 0;
+      transform: scale(0.85);
+      background: linear-gradient(135deg, #ffffff 0%, rgba(255,255,255,0.7) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      transition: opacity 1.2s ease, transform 1.2s var(--spring);
+    }
+    .atlas-logo.reveal {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    /* 3. Dashboard Container (3D Perspective Reveal) */
+    .dashboard {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      padding: 5rem;
+      display: flex;
+      flex-direction: column;
+      z-index: 8000;
+      opacity: 0;
+      /* Starts tilted backwards, scaled down, and pushed down */
+      transform: rotateX(35deg) translateY(120px) scale(0.92);
+      transform-origin: bottom center;
+      transition: opacity 1.4s ease, transform 1.6s var(--spring);
+    }
+    .dashboard.active {
+      opacity: 1;
+      transform: rotateX(0deg) translateY(0) scale(1);
+    }
+
+    /* 4. Cinematic Text Reveal */
+    .greeting {
+      font-size: 3.5rem;
+      font-weight: 600;
+      margin-bottom: 4rem;
+      letter-spacing: -0.02em;
+      
+      /* Light Sweep Gradient */
+      background: linear-gradient(90deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,1) 50%, rgba(255,255,255,0.2) 100%);
+      background-size: 200% auto;
+      color: transparent;
+      -webkit-background-clip: text;
+      background-clip: text;
+      
+      /* Hides text initially */
+      clip-path: polygon(0 0, 0 0, 0 100%, 0 100%);
+    }
+    
+    .dashboard.active .greeting {
+      /* Sweeps open the text and loops the light reflection */
+      animation: 
+        textReveal 1.2s cubic-bezier(0.77, 0, 0.175, 1) forwards 0.4s, 
+        shine 4s linear infinite 1.6s;
+    }
+    
+    @keyframes textReveal {
+      to { clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
+    }
+    @keyframes shine {
+      to { background-position: 200% center; }
+    }
+
+    /* 5. 3D Card Stagger */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 2rem;
+      perspective: 1200px;
+    }
+    
+    .card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 1.5rem;
+      padding: 3rem 2rem;
+      height: 240px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      
+      /* Start position for stagger */
+      opacity: 0;
+      transform: translateY(40px) rotateX(15deg);
+      transform-style: preserve-3d;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+    }
+
+    /* Base stagger offset handled securely by CSS variables or rigid nth-child */
+    .dashboard.active .card:nth-child(1) { animation: cardEnter 1.2s var(--spring) forwards 0.80s; }
+    .dashboard.active .card:nth-child(2) { animation: cardEnter 1.2s var(--spring) forwards 0.86s; } /* 60ms offset */
+    .dashboard.active .card:nth-child(3) { animation: cardEnter 1.2s var(--spring) forwards 0.92s; }
+    .dashboard.active .card:nth-child(4) { animation: cardEnter 1.2s var(--spring) forwards 0.98s; }
+
+    @keyframes cardEnter {
+      from { opacity: 0; transform: translateY(40px) rotateX(15deg); }
+      to { opacity: 1; transform: translateY(0) rotateX(0); }
+    }
+
+    /* 6. Haptic Micro-Pulse */
+    .card.pulse {
+      animation: hapticPulse 0.5s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+    }
+    
+    @keyframes hapticPulse {
+      0% { transform: scale(1); background: rgba(255, 255, 255, 0.02); }
+      40% { 
+        transform: scale(1.02); 
+        background: rgba(211, 43, 43, 0.08); /* Faint Atlas Red */
+        border-color: rgba(211, 43, 43, 0.4); 
+        box-shadow: 0 0 30px rgba(211, 43, 43, 0.2);
+      }
+      100% { transform: scale(1); background: rgba(255, 255, 255, 0.02); border-color: rgba(255, 255, 255, 0.08); }
+    }
+
+    /* Typographic Details */
+    .card-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.5);
+      margin-bottom: 1.5rem;
+    }
+    .card-value {
+      font-size: 3.5rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .card-value.highlight {
+      color: var(--atlas-red);
+      text-shadow: 0 0 20px rgba(211, 43, 43, 0.4);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Liquid Colour Wash -->
+  <div class="liquid-wash" id="wash"></div>
+
+  <!-- Particle Intro & Logo -->
+  <div class="intro-screen" id="intro">
+    <canvas id="particleCanvas"></canvas>
+    <div class="atlas-logo" id="logo">ATLAS</div>
+  </div>
+
+  <!-- Dashboard 3D Plane -->
+  <div class="dashboard" id="dash">
+    <h1 class="greeting">Good morning, Dr. Iyer.</h1>
+    <div class="cards-grid">
+      <div class="card" id="card-1">
+        <div class="card-title">Pending Tasks</div>
+        <div class="card-value highlight">04</div>
+      </div>
+      <div class="card" id="card-2">
+        <div class="card-title">Syllabus Matrix</div>
+        <div class="card-value">72%</div>
+      </div>
+      <div class="card" id="card-3">
+        <div class="card-title">Lectures Today</div>
+        <div class="card-value">03</div>
+      </div>
+      <div class="card" id="card-4">
+        <div class="card-title">AI Engine</div>
+        <div class="card-value" style="color: #4ade80; text-shadow: 0 0 20px rgba(74,222,128,0.3);">Online</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const wash = document.getElementById('wash');
+      const intro = document.getElementById('intro');
+      const logo = document.getElementById('logo');
+      const dash = document.getElementById('dash');
+      const cards = document.querySelectorAll('.card');
+
+      // 1. Initiate Liquid Wash Wipe Left-to-Right
+      setTimeout(() => {
+        wash.classList.add('wipe');
+      }, 150);
+
+      // 2. Converge Particles (driven by Canvas logic) & Reveal Text Logo
+      setTimeout(() => {
+        logo.classList.add('reveal');
+        startConvergence = true; // Signals particle system to collapse
+      }, 700);
+
+      // 3. Clear Intro Screen & Activate 3D Dashboard Plane
+      setTimeout(() => {
+        intro.classList.add('hidden');
+        dash.classList.add('active');
+      }, 2400);
+
+      // 4. Trigger Haptic Pulse (Time = Intro end (2400) + base stagger (800) + offset + spring duration (1200))
+      // Total approx time for card 1 to physically settle is -> 2400 + 800 + 1000 = 4200ms
+      cards.forEach((card, index) => {
+        setTimeout(() => {
+          card.classList.add('pulse');
+        }, 4200 + (index * 60)); // Maintains exact 60ms stagger interval
+      });
+      
+      // Re-run sequence on click for demo purposes
+      document.body.addEventListener('click', () => {
+         location.reload();
+      });
+    });
+
+    /* =========================================
+       CANVAS PARTICLE SYSTEM
+       ========================================= */
+    const canvas = document.getElementById('particleCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    let width, height, cx, cy;
+    let startConvergence = false;
+
+    function resize() {
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+      cx = width / 2;
+      cy = height / 2;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    class Particle {
+      constructor() {
+        // Start randomly scattered everywhere
+        this.x = Math.random() * width;
+        this.y = Math.random() * height;
+        
+        // Target is the logo center
+        this.tx = cx;
+        this.ty = cy;
+        
+        // Random geometric size & baseline alpha
+        this.size = Math.random() * 4 + 1.5;
+        this.alpha = Math.random() * 0.8 + 0.2;
+        
+        // Random drift speed before convergence
+        this.vx = (Math.random() - 0.5) * 2;
+        this.vy = (Math.random() - 0.5) * 2;
+
+        // Force Atlas Red or Pure White
+        this.color = Math.random() > 0.75 ? '#D32B2B' : '#ffffff';
+        this.convergeSpeed = Math.random() * 0.05 + 0.03;
+      }
+
+      update() {
+        if (!startConvergence) {
+          // Ambient drifting
+          this.x += this.vx;
+          this.y += this.vy;
+          
+          // Wrap around screen bounds
+          if(this.x < 0) this.x = width;
+          if(this.x > width) this.x = 0;
+          if(this.y < 0) this.y = height;
+          if(this.y > height) this.y = 0;
+        } else {
+          // Converge rapidly on center logo
+          const dx = this.tx - this.x;
+          const dy = this.ty - this.y;
+          this.x += dx * this.convergeSpeed;
+          this.y += dy * this.convergeSpeed;
+          
+          // Fade out as they reach the core
+          const dist = Math.hypot(dx, dy);
+          if (dist < 100) {
+            this.alpha -= 0.04; 
+          }
+        }
+      }
+
+      draw() {
+        if (this.alpha <= 0) return;
+        
+        ctx.globalAlpha = Math.max(0, this.alpha);
+        ctx.fillStyle = this.color;
+        
+        // Draw Hexagons
+        ctx.beginPath();
+        const a = 2 * Math.PI / 6;
+        for (let i = 0; i < 6; i++) {
+          ctx.lineTo(this.x + this.size * Math.cos(a * i), this.y + this.size * Math.sin(a * i));
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    const particles = Array.from({ length: 180 }, () => new Particle());
+
+    function render() {
+      ctx.clearRect(0, 0, width, height);
+      particles.forEach(p => {
+        p.update();
+        p.draw();
+      });
+      requestAnimationFrame(render);
+    }
+    
+    render();
+  </script>
+</body>
+</html>

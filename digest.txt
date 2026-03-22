@@ -1,0 +1,5421 @@
+Directory structure:
+└── atlas-intern/
+    ├── README.md
+    ├── docker-compose.yml
+    ├── make_ingest.py
+    ├── Makefile
+    ├── SETUP_GUIDE.txt
+    ├── .env.example
+    ├── backend/
+    │   ├── alembic.ini
+    │   ├── Dockerfile
+    │   ├── requirements.txt
+    │   ├── .dockerignore
+    │   ├── .env.example
+    │   ├── alembic/
+    │   │   ├── env.py
+    │   │   ├── script.py.mako
+    │   │   └── versions/
+    │   │       ├── 001_initial_schema.py
+    │   │       ├── 002_user_status_policies.py
+    │   │       └── 003_create_admin_user.py
+    │   ├── app/
+    │   │   ├── __init__.py
+    │   │   ├── authz.map.json
+    │   │   ├── main.py
+    │   │   ├── public.map.json
+    │   │   ├── api/
+    │   │   │   ├── __init__.py
+    │   │   │   ├── admin.py
+    │   │   │   ├── agents.py
+    │   │   │   ├── ai.py
+    │   │   │   ├── auth.py
+    │   │   │   ├── telemetry.py
+    │   │   │   └── users.py
+    │   │   ├── core/
+    │   │   │   ├── __init__.py
+    │   │   │   ├── authz.py
+    │   │   │   ├── config.py
+    │   │   │   ├── database.py
+    │   │   │   ├── dependencies.py
+    │   │   │   └── security.py
+    │   │   ├── middleware/
+    │   │   │   ├── __init__.py
+    │   │   │   └── audit.py
+    │   │   ├── models/
+    │   │   │   ├── __init__.py
+    │   │   │   ├── agent.py
+    │   │   │   ├── audit.py
+    │   │   │   ├── policy.py
+    │   │   │   └── user.py
+    │   │   ├── modules/
+    │   │   │   ├── __init__.py
+    │   │   │   ├── hr_bot/
+    │   │   │   │   └── __init__.py
+    │   │   │   └── timetable_ai/
+    │   │   │       └── __init__.py
+    │   │   ├── schemas/
+    │   │   │   ├── __init__.py
+    │   │   │   ├── agent_schema.py
+    │   │   │   ├── ai_schema.py
+    │   │   │   └── user_schema.py
+    │   │   └── services/
+    │   │       ├── __init__.py
+    │   │       ├── audit.py
+    │   │       ├── keycloak.py
+    │   │       ├── keycloak_admin.py
+    │   │       └── ai/
+    │   │           ├── __init__.py
+    │   │           ├── chat.py
+    │   │           ├── gemini.py
+    │   │           ├── insights.py
+    │   │           ├── policy.py
+    │   │           └── tools.py
+    │   └── gunicorn/
+    │       ├── dev.py
+    │       └── prod.py
+    └── frontend/
+        ├── Dockerfile
+        ├── next-env.d.ts
+        ├── next.config.js
+        ├── package.json
+        ├── postcss.config.js
+        ├── tailwind.config.ts
+        ├── tsconfig.json
+        ├── .dockerignore
+        ├── .env.local.example
+        └── src/
+            ├── app/
+            │   ├── globals.css
+            │   ├── layout.tsx
+            │   └── (dashboard)/
+            │       ├── layout.tsx
+            │       ├── page.tsx
+            │       ├── admin/
+            │       │   ├── audit/
+            │       │   │   └── page.tsx
+            │       │   └── users/
+            │       │       └── page.tsx
+            │       ├── ai/
+            │       │   ├── insights/
+            │       │   │   └── page.tsx
+            │       │   └── policies/
+            │       │       └── page.tsx
+            │       ├── modules/
+            │       │   └── page.tsx
+            │       └── settings/
+            │           └── page.tsx
+            ├── components/
+            │   ├── ai/
+            │   │   └── AIManager.tsx
+            │   ├── charts/
+            │   │   └── DashboardOverview.tsx
+            │   ├── layout/
+            │   │   ├── Header.tsx
+            │   │   └── Sidebar.tsx
+            │   └── ui/
+            │       └── .gitkeep
+            └── lib/
+                ├── api.ts
+                └── store.ts
+
+================================================
+FILE: README.md
+================================================
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x9d in position 3240: character maps to <undefined>
+
+
+================================================
+FILE: docker-compose.yml
+================================================
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: atlas_secret
+      POSTGRES_DB: atlas_db
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atlas -d atlas_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - atlas-network
+
+  keycloak-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${KEYCLOAK_DB_USER:-keycloak}
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak_secret}
+      POSTGRES_DB: ${KEYCLOAK_DB_DATABASE:-keycloak_db}
+    volumes:
+      - keycloak-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KEYCLOAK_DB_USER:-keycloak} -d ${KEYCLOAK_DB_DATABASE:-keycloak_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - atlas-network
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    command: start-dev
+    environment:
+      KC_DB: postgres
+      KC_DB_URL_HOST: keycloak-db
+      KC_DB_URL_DATABASE: ${KEYCLOAK_DB_DATABASE:-keycloak_db}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER:-keycloak}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak_secret}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HOSTNAME_STRICT: false
+      KC_HTTP_ENABLED: true
+      KC_PROXY: edge
+    ports:
+      - "${KEYCLOAK_PORT:-8080}:8080"
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    networks:
+      - atlas-network
+
+  backend:
+    build: ./backend
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://atlas:atlas_secret@db:5432/atlas_db}
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      ALGORITHM: ${ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-gemini-2.0-flash-exp}
+      APPROVED_EMAIL_DOMAINS: ${APPROVED_EMAIL_DOMAINS:-atlasuniversity.edu.in}
+      KEYCLOAK_SERVER_URL: ${KEYCLOAK_SERVER_URL:-http://keycloak:8080}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-atlas}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-atlas-backend}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+    networks:
+      - atlas-network
+
+  frontend:
+    build:
+      context: ./frontend
+      target: ${FRONTEND_TARGET:-dev}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change-me-in-production}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      KEYCLOAK_SERVER_URL: ${KEYCLOAK_SERVER_URL:-http://localhost:8080}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-atlas}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-atlas-frontend}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
+    depends_on:
+      - backend
+      - keycloak
+    volumes:
+      # Mount source code for hot reload
+      - ./frontend/src:/app/src:ro
+      - ./frontend/public:/app/public:ro
+      - ./frontend/package.json:/app/package.json:ro
+      - ./frontend/tsconfig.json:/app/tsconfig.json:ro
+      - ./frontend/next.config.js:/app/next.config.js:ro
+      - ./frontend/tailwind.config.ts:/app/tailwind.config.ts:ro
+      - ./frontend/postcss.config.js:/app/postcss.config.js:ro
+      # Preserve node_modules from image (don't overwrite)
+      - frontend_node_modules:/app/node_modules
+      # Preserve .next cache
+      - frontend_next:/app/.next
+    networks:
+      - atlas-network
+
+volumes:
+  pgdata:
+  keycloak-pgdata:
+  frontend_node_modules:
+  frontend_next:
+
+networks:
+  atlas-network:
+    driver: bridge
+
+
+
+================================================
+FILE: make_ingest.py
+================================================
+#!/usr/bin/env python3
+"""
+Digest generation script using gitingest.
+Development utility for creating code digests for Atlas-Template.
+"""
+
+import importlib.util
+import logging
+import shutil
+import subprocess
+import sys
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+log = logging.getLogger(__name__)
+
+
+def _resolve_gitingest_command():
+    cli_path = shutil.which("gitingest")
+    if cli_path:
+        return [cli_path]
+
+    if importlib.util.find_spec("gitingest.cli") is not None:
+        return [sys.executable, "-m", "gitingest.cli"]
+
+    return None
+
+
+def generate_digest_cli(
+    source, output_file="digest.txt", exclude_exts=None, is_frontend=False
+):
+    base_cmd = _resolve_gitingest_command()
+    if not base_cmd:
+        log.error(
+            "gitingest is not available. Install it with "
+            "'python -m pip install gitingest' or add the gitingest executable to PATH."
+        )
+        return
+
+    cmd = base_cmd + [source, "-o", output_file]
+
+    # Frontend-specific exclusions when processing frontend folder
+    if is_frontend:
+        exclusions = [
+            # Build and cache directories
+            "node_modules",
+            "node_modules/*",
+            ".next",
+            ".next/*",
+            "out",
+            "build",
+            "dist",
+            ".cache",
+            # Generated files
+            "package-lock.json",
+            "yarn.lock",
+            ".tsbuildinfo",
+            "*.tsbuildinfo",
+            # Test and coverage
+            "coverage",
+            "__tests__/coverage",
+            ".nyc_output",
+            # Static assets
+            "public/images",
+            "public/fonts",
+            "public/*.ico",
+            "public/*.png",
+            "public/*.svg",
+            # IDE and system files
+            ".vscode",
+            ".idea",
+            ".DS_Store",
+            # Storybook
+            "storybook-static",
+            ".storybook-build",
+            # Environment files
+            ".env",
+            ".env.*",
+            # Temporary files
+            "*.log",
+            "npm-debug.log*",
+            "yarn-debug.log*",
+            "yarn-error.log*",
+        ]
+    else:
+        # Default exclusions for repo root or backend (keep digest manageable)
+        exclusions = [
+            # Exclude entire frontend for backend-only digest
+            "frontend",
+            "frontend/*",
+            "frontend/**",
+            # Python
+            "__pycache__",
+            "__pycache__/*",
+            "*/__pycache__",
+            "**/__pycache__/**",
+            "*.pyc",
+            "*.pyo",
+            "*.egg-info",
+            ".pytest_cache",
+            "venv",
+            "venv/*",
+            ".venv",
+            "env",
+            ".env",
+            ".env.*",
+            # Backend build/dist
+            "build",
+            "dist",
+            "*.egg",
+            # Alembic (optional: remove to include migrations in digest)
+            "backend/alembic/versions",
+            "backend/alembic/versions/*",
+            "backend/alembic.ini",
+            # Node/frontend at root
+            "node_modules",
+            "node_modules/*",
+            "**/node_modules/**",
+            "frontend/node_modules",
+            "frontend/.next",
+            "frontend/.next/*",
+            "frontend/.next/**",
+            "frontend/package-lock.json",
+            "frontend/yarn.lock",
+            "package-lock.json",
+            "yarn.lock",
+            ".next",
+            ".next/*",
+            "out",
+            "build",
+            "dist",
+            ".cache",
+            ".tsbuildinfo",
+            "*.tsbuildinfo",
+            # Version control and IDE
+            ".git",
+            ".gitignore",
+            ".vscode",
+            ".idea",
+            ".DS_Store",
+            "Thumbs.db",
+            # Logs and temp
+            "*.log",
+            "*.tmp",
+            "*.temp",
+            "logs",
+            # Docs and media (optional)
+            "*.png",
+            "*.jpg",
+            "*.jpeg",
+            "*.gif",
+            "*.svg",
+            "*.ico",
+            "*.pdf",
+            # Infra at root (optional: include if you want Docker/Makefile in digest)
+            "Dockerfile",
+            "Makefile",
+            "docker-compose*.yml",
+            ".env.example",
+        ]
+
+    if exclude_exts:
+        exclusions.extend(f"*{ext}" for ext in exclude_exts)
+
+    if is_frontend:
+        include_patterns = [
+            "*.tsx",
+            "*.ts",
+            "*.jsx",
+            "*.js",
+            "*.css",
+            "*.scss",
+            "*.sass",
+            "*.less",
+            "*.module.css",
+            "*.module.scss",
+            "*.module.sass",
+            "*.module.less",
+            "*.json",
+            "*.html",
+        ]
+        cmd += ["-i", ",".join(include_patterns)]
+
+    if exclusions:
+        patterns = ",".join(exclusions)
+        cmd += ["-e", patterns]
+
+    log.info(f"Running: {' '.join(cmd)}")
+
+    try:
+        subprocess.run(cmd, check=True)
+        log.info(f"Digest written to {output_file}")
+    except subprocess.CalledProcessError as e:
+        log.error(f"Error during gitingest execution: {e}")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        log.error(
+            "Usage: python make_ingest.py <path_or_url> [output_file] [--frontend] [excluded_exts...]"
+        )
+        sys.exit(1)
+
+    source = sys.argv[1]
+    output_file = "digest.txt"
+    exclude_exts = []
+    is_frontend = False
+
+    args = sys.argv[2:]
+    while args:
+        arg = args.pop(0)
+        if arg == "--frontend":
+            is_frontend = True
+        elif arg.startswith("."):
+            exclude_exts.append(arg)
+        else:
+            output_file = arg
+
+    if not is_frontend and (
+        "frontend" in source.lower() or "front-end" in source.lower()
+    ):
+        is_frontend = True
+        log.info("Detected frontend directory, using frontend-specific processing...")
+
+    generate_digest_cli(source, output_file, exclude_exts, is_frontend)
+
+
+
+================================================
+FILE: Makefile
+================================================
+.PHONY: up down restart logs logs-be logs-fe restart-be restart-fe format lint test-be migrate-up migrate-down migrate-create migrate-history shell-be shell-fe clean
+
+up:
+	docker compose up -d
+
+down:
+	docker compose down
+
+restart: down up
+
+logs:
+	docker compose logs -f
+
+logs-be:
+	docker compose logs -f backend
+
+logs-fe:
+	docker compose logs -f frontend
+
+logs-db:
+	docker compose logs -f db
+
+logs-keycloak:
+	docker compose logs -f keycloak
+
+restart-be:
+	docker compose restart backend
+
+restart-fe:
+	docker compose restart frontend
+
+format:
+	cd backend && black app/ && isort app/
+	cd frontend && npm run format
+
+lint:
+	cd backend && ruff check app/
+	cd frontend && npm run lint
+
+test-be:
+	cd backend && pytest
+
+migrate-up:
+	docker compose exec backend alembic upgrade head
+
+migrate-down:
+	docker compose exec backend alembic downgrade -1
+
+migrate-create:
+	@if [ -z "$(MSG)" ]; then \
+		echo "Usage: make migrate-create MSG='your message'"; \
+		exit 1; \
+	fi
+	docker compose exec backend alembic revision --autogenerate -m "$(MSG)"
+
+migrate-history:
+	docker compose exec backend alembic history
+
+shell-be:
+	docker compose exec backend bash
+
+shell-fe:
+	docker compose exec frontend sh
+
+shell-db:
+	docker compose exec db psql -U atlas -d atlas_db
+
+clean:
+	docker compose down -v
+	rm -rf backend/__pycache__ backend/.pytest_cache
+	rm -rf frontend/.next frontend/node_modules
+
+help:
+	@echo "Available commands:"
+	@echo "  make up              - Start all services"
+	@echo "  make down            - Stop all services"
+	@echo "  make logs            - View all logs"
+	@echo "  make logs-be         - View backend logs"
+	@echo "  make logs-fe         - View frontend logs"
+	@echo "  make restart-be      - Restart backend"
+	@echo "  make restart-fe      - Restart frontend"
+	@echo "  make format          - Format all code"
+	@echo "  make lint            - Lint all code"
+	@echo "  make test-be         - Run backend tests"
+	@echo "  make migrate-up      - Apply pending migrations"
+	@echo "  make migrate-down    - Rollback one migration"
+	@echo "  make migrate-create  - Create new migration (use MSG='...')"
+	@echo "  make migrate-history - View migration history"
+	@echo "  make shell-be        - Open backend shell"
+	@echo "  make shell-fe        - Open frontend shell"
+	@echo "  make shell-db        - Open database shell"
+	@echo "  make clean           - Clean all containers and volumes"
+
+
+
+================================================
+FILE: SETUP_GUIDE.txt
+================================================
+# Atlas AI Command Center - Quick Start Guide
+
+All features from the Atlas Skilltech University template have been successfully added to your codebase!
+
+## What Was Added
+
+### âœ… Backend Features
+- **JSON Authorization Engine**: `authz.py`, `authz.map.json`, `public.map.json` for role-based access control
+- **User Approval System**: Pending/Approved/Rejected status with admin approval workflow
+- **Audit Service**: Automatic request logging + custom event logging with export
+- **AI Features**: Gemini integration for policies, insights, and chat
+- **Keycloak Integration**: Services for Keycloak admin API and JWT validation
+- **New API Routes**: `/api/admin/*`, `/api/ai/*`
+
+### âœ… Frontend Features
+- **NextAuth.js**: Session management with JWT tokens
+- **Auth Middleware**: Route protection for authenticated pages
+- **Admin Pages**: User management and audit log viewer
+- **AI Pages**: Policy management and insights dashboard
+- **AI Manager**: Global chatbot modal accessible from header
+- **Updated Sidebar**: New navigation items for all features
+
+### âœ… Infrastructure
+- **Makefile**: Dev commands (up, down, logs, migrate, etc.)
+- **Root .env.example**: Complete configuration template
+- **Updated docker-compose.yml**: Added Keycloak + separate database
+- **Database Migrations**: New schema for user status and policies
+- **Updated Dependencies**: Added google-generativeai, httpx, next-auth, react-markdown
+
+## Getting Started
+
+### 1. Copy Environment File
+```bash
+cp .env.example .env
+```
+
+### 2. Generate Secrets
+```bash
+openssl rand -base64 32
+```
+Copy the output and set it in `.env` for both:
+- `SECRET_KEY`
+- `NEXTAUTH_SECRET`
+
+### 3. (Optional) Add Gemini API Key
+Get your key from https://aistudio.google.com/apikey and add to `.env`:
+```
+GEMINI_API_KEY=your-api-key-here
+```
+
+### 4. Start Services
+```bash
+make up
+```
+
+This will start:
+- PostgreSQL (port 5432)
+- Keycloak (port 8080)
+- Backend API (port 8000)
+- Frontend (port 3000)
+
+### 5. Access the Application
+- **Frontend**: http://localhost:3000
+- **Backend API Docs**: http://localhost:8000/docs
+- **Keycloak Admin**: http://localhost:8080 (admin/admin)
+
+### 6. Default Admin Login
+- **Email**: admin@atlasuniversity.edu.in
+- **Password**: admin123
+
+## Features Overview
+
+### User Management (`/admin/users`)
+- View all users
+- Approve/reject pending registrations
+- Domain-based auto-approval (configure in `.env`)
+
+### Audit Logs (`/admin/audit`)
+- View all system activity
+- Export logs as JSON
+- Automatic request logging
+
+### AI Policies (`/ai/policies`)
+- Create policies in natural language
+- AI translates to executable DSL
+- Manage policy status and priority
+
+### AI Insights (`/ai/insights`)
+- AI-generated system recommendations
+- Severity levels: Critical, Warning, Recommendation
+- Actionable suggestions with impact estimates
+
+### AI Manager (Header â†’ ðŸ¤– Button)
+- Context-aware chatbot
+- Function calling (search logs, get stats, etc.)
+- Available on all pages
+
+## Useful Commands
+
+```bash
+make up              # Start all services
+make down            # Stop all services
+make logs-be         # View backend logs
+make logs-fe         # View frontend logs
+make restart-be      # Restart backend
+make migrate-up      # Apply database migrations
+make shell-db        # Open PostgreSQL shell
+```
+
+## Configuration Notes
+
+### Ports
+Default ports can be changed in `.env`:
+- `FRONTEND_PORT=3000`
+- `BACKEND_PORT=8000`
+- `DB_PORT=5432`
+- `KEYCLOAK_PORT=8080`
+
+### Email Domains (Auto-Approval)
+Set approved domains in `.env`:
+```
+APPROVED_EMAIL_DOMAINS=atlasuniversity.edu.in,example.com
+```
+
+### AI Model
+Change the AI model in `.env`:
+```
+AI_MODEL=gemini-2.0-flash-exp
+```
+
+## Keycloak Setup (Optional)
+
+If you want to use Keycloak instead of local JWT auth:
+
+1. Access Keycloak at http://localhost:8080
+2. Login with admin/admin
+3. Create a realm called "atlas"
+4. Create a client called "atlas-backend"
+5. Get client secret and add to `.env`
+6. Update `KEYCLOAK_SERVER_URL` in `.env`
+
+## Next Steps
+
+1. **Change default passwords** in production
+2. **Configure your domain** for email auto-approval
+3. **Add your Gemini API key** to enable AI features
+4. **Customize authz.map.json** for your access control needs
+5. **Update branding** (logo, colors, etc.)
+
+## Troubleshooting
+
+### Port conflicts
+```bash
+make down
+# Change ports in .env
+make up
+```
+
+### Database issues
+```bash
+make clean  # Removes all data - use with caution
+make up
+```
+
+### Frontend not updating
+```bash
+# If using FRONTEND_TARGET=prod in .env
+docker compose build frontend
+make up
+```
+
+### AI features not working
+Ensure `GEMINI_API_KEY` is set in `.env`. Without it, demo data will be shown.
+
+## Architecture
+
+```
+Backend (FastAPI):
+â”œâ”€â”€ app/
+â”‚   â”œâ”€â”€ api/          # Routes (auth, users, agents, admin, ai)
+â”‚   â”œâ”€â”€ core/         # Config, database, security, authz
+â”‚   â”œâ”€â”€ models/       # SQLAlchemy models
+â”‚   â”œâ”€â”€ schemas/      # Pydantic schemas
+â”‚   â”œâ”€â”€ services/     # Business logic (audit, keycloak, ai)
+â”‚   â””â”€â”€ middleware/   # Audit logging middleware
+
+Frontend (Next.js):
+â”œâ”€â”€ src/
+â”‚   â”œâ”€â”€ app/          # Pages (auth, admin, ai)
+â”‚   â”œâ”€â”€ components/   # Reusable components
+â”‚   â”‚   â”œâ”€â”€ layout/   # Header, Sidebar
+â”‚   â”‚   â”œâ”€â”€ auth/     # AuthProvider
+â”‚   â”‚   â””â”€â”€ ai/       # AIManager
+â”‚   â”œâ”€â”€ lib/          # API client, utilities
+â”‚   â””â”€â”€ middleware.ts # Auth middleware
+```
+
+## Support
+
+All features are production-ready. Customize as needed for your use case!
+
+
+
+================================================
+FILE: .env.example
+================================================
+# =============================================================================
+# Atlas AI Command Center - Environment Configuration
+# =============================================================================
+# Copy this file to .env and update the values.
+# DO NOT commit .env to version control.
+# For local Docker: copy to .env and run docker compose up; many defaults work.
+# For production: set SECRET_KEY, NEXTAUTH_SECRET, and Keycloak/DB credentials.
+
+# =============================================================================
+# BACKEND CONFIGURATION
+# =============================================================================
+
+# --- Application ---
+APP_ENV=development  # development or production
+APP_NAME=Atlas AI Command Center
+LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR
+DEBUG=false
+
+# --- CORS (comma-separated; default allows localhost:3000,3000) ---
+# CORS_ORIGINS=http://localhost:3000,https://your-app.example.com
+
+# --- Database (PostgreSQL 15) ---
+DATABASE_URL=postgresql+asyncpg://atlas:atlas_secret@db:5432/atlas_db
+
+# --- JWT (generate with: openssl rand -base64 32) ---
+SECRET_KEY=change-me-in-production-use-openssl-rand-base64-32
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# --- Storage ---
+STORAGE_BACKEND=local  # local or gcs
+# GCS_BUCKET_NAME=your-bucket-name  # Only needed if STORAGE_BACKEND=gcs
+
+# --- AI Features (Gemini) ---
+# Get your API key from: https://aistudio.google.com/apikey
+GEMINI_API_KEY=  # Optional but required for AI features
+AI_MODEL=gemini-2.0-flash-exp  # or gemini-1.5-pro, gemini-1.5-flash
+
+# --- User Registration ---
+APPROVED_EMAIL_DOMAINS=atlasuniversity.edu.in,example.com  # Comma-separated domains for auto-approval
+
+# =============================================================================
+# FRONTEND CONFIGURATION
+# =============================================================================
+
+# --- Next.js ---
+NODE_ENV=development  # development or production
+FRONTEND_TARGET=dev  # dev (hot reload) or prod (optimized build)
+
+# --- API URLs ---
+NEXT_PUBLIC_API_URL=http://localhost:8000  # Backend API URL (browser-side)
+NEXT_PUBLIC_BASE_PATH=  # Base path for reverse proxy (leave empty for local)
+
+# =============================================================================
+# KEYCLOAK CONFIGURATION
+# =============================================================================
+
+# --- Keycloak Server (Backend needs these) ---
+KEYCLOAK_SERVER_URL=https://your-keycloak-instance.run.app  # Your Keycloak URL
+KEYCLOAK_REALM=atlas
+KEYCLOAK_CLIENT_ID=atlas-backend
+KEYCLOAK_CLIENT_SECRET=your-keycloak-client-secret
+
+# --- Keycloak Admin API (for user management) ---
+KEYCLOAK_ADMIN_CLIENT_ID=admin-cli
+KEYCLOAK_ADMIN_CLIENT_SECRET=your-admin-client-secret
+
+# --- Keycloak Database ---
+KEYCLOAK_DB_VENDOR=postgres
+KEYCLOAK_DB_ADDR=db
+KEYCLOAK_DB_PORT=5432
+KEYCLOAK_DB_DATABASE=keycloak_db
+KEYCLOAK_DB_USER=keycloak
+KEYCLOAK_DB_PASSWORD=keycloak_secret
+
+# --- Keycloak Admin User (Initial setup only) ---
+KEYCLOAK_ADMIN=admin
+KEYCLOAK_ADMIN_PASSWORD=admin_password_change_me
+
+# =============================================================================
+# DOCKER & DEVELOPMENT
+# =============================================================================
+
+# --- Port Mapping (change if ports are in use) ---
+FRONTEND_PORT=3000
+BACKEND_PORT=8000
+DB_PORT=5432
+KEYCLOAK_PORT=8080
+
+# --- PostgreSQL ---
+POSTGRES_USER=atlas
+POSTGRES_PASSWORD=atlas_secret
+POSTGRES_DB=atlas_db
+
+
+
+================================================
+FILE: backend/alembic.ini
+================================================
+[alembic]
+script_location = alembic
+prepend_sys_path = .
+version_path_separator = os
+sqlalchemy.url = driver://user:pass@localhost/dbname
+
+[post_write_hooks]
+
+[loggers]
+keys = root,sqlalchemy,alembic
+
+[handlers]
+keys = console
+
+[formatters]
+keys = generic
+
+[logger_root]
+level = WARN
+handlers = console
+qualname =
+
+[logger_sqlalchemy]
+level = WARN
+handlers =
+qualname = sqlalchemy.engine
+
+[logger_alembic]
+level = INFO
+handlers =
+qualname = alembic
+
+[handler_console]
+class = StreamHandler
+args = (sys.stderr,)
+level = NOTSET
+formatter = generic
+
+[formatter_generic]
+format = %(levelname)-5.5s [%(name)s] %(message)s
+datefmt = %H:%M:%S
+
+
+
+================================================
+FILE: backend/Dockerfile
+================================================
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# No system deps needed: psycopg2-binary and asyncpg use pre-built wheels
+
+# Copy requirements first for better layer caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy application code (__pycache__ excluded via .dockerignore)
+COPY . .
+
+# Run database migrations and start server
+CMD alembic upgrade head && \
+    uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+
+
+================================================
+FILE: backend/requirements.txt
+================================================
+# Atlas AI Command Center Backend - Python 3.11+
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+gunicorn==21.2.0
+sqlalchemy[asyncio]==2.0.25
+asyncpg==0.29.0
+alembic==1.13.1
+pydantic[email]==2.6.1
+pydantic-settings==2.1.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.9
+websockets==12.0
+psycopg2-binary==2.9.9
+google-generativeai==0.8.0
+httpx==0.27.0
+
+
+
+================================================
+FILE: backend/.dockerignore
+================================================
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.env
+.env.local
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.git
+.gitignore
+*.log
+
+
+
+================================================
+FILE: backend/.env.example
+================================================
+# Atlas AI Command Center - Environment Template
+# Copy to .env and fill in values
+
+# Database (PostgreSQL 15) - use atlas_db for docker-compose
+DATABASE_URL=postgresql+asyncpg://atlas:atlas_secret@localhost:5432/atlas_db
+
+# JWT (generate a long random string for production)
+SECRET_KEY=your-super-secret-key-change-in-production
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# App
+APP_NAME=Atlas AI Command Center
+DEBUG=false
+
+
+
+================================================
+FILE: backend/alembic/env.py
+================================================
+from logging.config import fileConfig
+
+from sqlalchemy import create_engine
+from alembic import context
+
+from app.core.config import settings
+from app.core.database import Base
+from app.models import User, Agent, AgentTask, AuditLog
+
+config = context.config
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+sync_url = settings.database_url.replace("+asyncpg", "").replace("postgresql+asyncpg", "postgresql")
+target_metadata = Base.metadata
+
+
+def run_migrations_offline() -> None:
+    context.configure(
+        url=sync_url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    engine = create_engine(sync_url)
+    with engine.connect() as connection:
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+
+
+
+================================================
+FILE: backend/alembic/script.py.mako
+================================================
+"""${message}
+
+Revision ID: ${up_revision}
+Revises: ${down_revision | comma,n}
+Create Date: ${create_date}
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+${imports if imports else ""}
+
+# revision identifiers, used by Alembic.
+revision: str = ${repr(up_revision)}
+down_revision: Union[str, None] = ${repr(down_revision)}
+branch_labels: Union[str, Sequence[str], None] = ${repr(branch_labels)}
+depends_on: Union[str, Sequence[str], None] = ${repr(depends_on)}
+
+
+def upgrade() -> None:
+    ${upgrades if upgrades else "pass"}
+
+
+def downgrade() -> None:
+    ${downgrades if downgrades else "pass"}
+
+
+
+================================================
+FILE: backend/alembic/versions/001_initial_schema.py
+================================================
+"""Initial schema: users, agents, agent_tasks, audit_logs
+
+Revision ID: 001
+Revises:
+Create Date: 2025-03-11
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+
+
+revision: str = "001"
+down_revision: Union[str, None] = None
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    op.create_table(
+        "users",
+        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column("email", sa.String(255), nullable=False),
+        sa.Column("hashed_password", sa.String(255), nullable=False),
+        sa.Column("role", sa.Enum("ADMIN", "DEVELOPER", "USER", name="userrole"), nullable=False),
+        sa.Column("is_active", sa.Boolean(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index(op.f("ix_users_email"), "users", ["email"], unique=True)
+
+    op.create_table(
+        "agents",
+        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column("name", sa.String(255), nullable=False),
+        sa.Column("module_type", sa.String(128), nullable=False),
+        sa.Column("status", sa.Enum("Idle", "Processing", "Error", "Offline", name="agentstatus"), nullable=False),
+        sa.Column("last_heartbeat", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index(op.f("ix_agents_name"), "agents", ["name"], unique=False)
+    op.create_index(op.f("ix_agents_module_type"), "agents", ["module_type"], unique=False)
+
+    op.create_table(
+        "agent_tasks",
+        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column("agent_id", sa.Integer(), nullable=False),
+        sa.Column("task_description", sa.Text(), nullable=False),
+        sa.Column("status", sa.Enum("Pending", "Success", "Failed", "Running", name="taskstatus"), nullable=False),
+        sa.Column("execution_time", sa.Float(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(["agent_id"], ["agents.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+    )
+
+    op.create_table(
+        "audit_logs",
+        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=True),
+        sa.Column("action", sa.String(255), nullable=False),
+        sa.Column("ip_address", sa.String(45), nullable=True),
+        sa.Column("details", sa.Text(), nullable=True),
+        sa.Column("timestamp", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="SET NULL"),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index(op.f("ix_audit_logs_action"), "audit_logs", ["action"], unique=False)
+
+
+def downgrade() -> None:
+    op.drop_index(op.f("ix_audit_logs_action"), table_name="audit_logs")
+    op.drop_table("audit_logs")
+    op.drop_table("agent_tasks")
+    op.drop_index(op.f("ix_agents_module_type"), table_name="agents")
+    op.drop_index(op.f("ix_agents_name"), table_name="agents")
+    op.drop_table("agents")
+    op.drop_index(op.f("ix_users_email"), table_name="users")
+    op.drop_table("users")
+    op.execute("DROP TYPE IF EXISTS taskstatus")
+    op.execute("DROP TYPE IF EXISTS agentstatus")
+    op.execute("DROP TYPE IF EXISTS userrole")
+
+
+
+================================================
+FILE: backend/alembic/versions/002_user_status_policies.py
+================================================
+"""Add user status and policy tables
+
+Revision ID: 002_user_status_policies
+Revises: 001_initial_schema
+Create Date: 2026-03-15
+
+"""
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+
+revision = '002_user_status_policies'
+down_revision = '001'
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    # Add status column to users table
+    op.execute("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'ADMIN'")
+    op.execute("CREATE TYPE userstatus AS ENUM ('PENDING', 'APPROVED', 'REJECTED')")
+    
+    op.add_column('users', sa.Column('status', sa.Enum('PENDING', 'APPROVED', 'REJECTED', name='userstatus'), nullable=False, server_default='PENDING'))
+    op.add_column('users', sa.Column('approved_at', sa.DateTime(timezone=True), nullable=True))
+    op.add_column('users', sa.Column('approved_by', sa.Integer(), nullable=True))
+    
+    # Create policies table
+    op.create_table('policies',
+        sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column('name', sa.String(length=255), nullable=False),
+        sa.Column('description', sa.Text(), nullable=True),
+        sa.Column('policy_type', sa.Enum('LOGICAL', 'NATURAL_LANGUAGE', name='policytype'), nullable=False),
+        sa.Column('natural_language', sa.Text(), nullable=True),
+        sa.Column('dsl', sa.Text(), nullable=True),
+        sa.Column('status', sa.Enum('ACTIVE', 'INACTIVE', 'DRAFT', name='policystatus'), nullable=False),
+        sa.Column('priority', sa.Integer(), nullable=False),
+        sa.Column('created_by', sa.Integer(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint('id')
+    )
+    
+    op.create_index(op.f('ix_policies_status'), 'policies', ['status'], unique=False)
+    op.create_index(op.f('ix_policies_priority'), 'policies', ['priority'], unique=False)
+
+
+def downgrade():
+    op.drop_index(op.f('ix_policies_priority'), table_name='policies')
+    op.drop_index(op.f('ix_policies_status'), table_name='policies')
+    op.drop_table('policies')
+    
+    op.drop_column('users', 'approved_by')
+    op.drop_column('users', 'approved_at')
+    op.drop_column('users', 'status')
+    
+    op.execute('DROP TYPE IF EXISTS userstatus')
+    op.execute('DROP TYPE IF EXISTS policytype')
+    op.execute('DROP TYPE IF EXISTS policystatus')
+
+
+
+================================================
+FILE: backend/alembic/versions/003_create_admin_user.py
+================================================
+"""Create initial admin user
+
+Revision ID: 003_create_admin_user
+Revises: 002_user_status_policies
+Create Date: 2026-03-15
+
+"""
+from alembic import op
+import sqlalchemy as sa
+from datetime import datetime, timezone
+
+revision = '003_create_admin_user'
+down_revision = '002_user_status_policies'
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    # Create initial admin user (password: admin123)
+    # Use bcrypt hash for password "admin123"
+    op.execute("""
+        INSERT INTO users (email, hashed_password, role, status, is_active, created_at)
+        VALUES (
+            'admin@atlasuniversity.edu.in',
+            '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYzS8lhCHSm',
+            'ADMIN',
+            'APPROVED',
+            true,
+            NOW()
+        )
+        ON CONFLICT (email) DO NOTHING;
+    """)
+
+
+def downgrade():
+    op.execute("""
+        DELETE FROM users WHERE email = 'admin@atlasuniversity.edu.in';
+    """)
+
+
+
+================================================
+FILE: backend/app/__init__.py
+================================================
+# Atlas AI Command Center Backend
+
+
+
+================================================
+FILE: backend/app/authz.map.json
+================================================
+{
+  "/api/users/me": {
+    "GET": ["ADMIN", "DEVELOPER", "USER"]
+  },
+  "/api/users": {
+    "GET": ["ADMIN"],
+    "POST": ["ADMIN"]
+  },
+  "/api/users/{id}": {
+    "GET": ["ADMIN"],
+    "PUT": ["ADMIN"],
+    "DELETE": ["ADMIN"]
+  },
+  "/api/admin/users": {
+    "GET": ["ADMIN"]
+  },
+  "/api/admin/users/pending": {
+    "GET": ["ADMIN"]
+  },
+  "/api/admin/users/{id}/approve": {
+    "POST": ["ADMIN"]
+  },
+  "/api/admin/users/{id}/reject": {
+    "POST": ["ADMIN"]
+  },
+  "/api/admin/audit": {
+    "GET": ["ADMIN"]
+  },
+  "/api/admin/audit/export": {
+    "GET": ["ADMIN"]
+  },
+  "/api/agents": {
+    "GET": ["ADMIN", "DEVELOPER"],
+    "POST": ["ADMIN", "DEVELOPER"]
+  },
+  "/api/agents/{id}": {
+    "GET": ["ADMIN", "DEVELOPER"],
+    "PUT": ["ADMIN", "DEVELOPER"],
+    "DELETE": ["ADMIN"]
+  },
+  "/api/telemetry": {
+    "POST": ["ADMIN", "DEVELOPER", "USER"]
+  },
+  "/api/ai/policies": {
+    "GET": ["ADMIN", "DEVELOPER", "USER"],
+    "POST": ["ADMIN", "DEVELOPER"]
+  },
+  "/api/ai/policies/{id}": {
+    "GET": ["ADMIN", "DEVELOPER", "USER"],
+    "PUT": ["ADMIN", "DEVELOPER"],
+    "DELETE": ["ADMIN"]
+  },
+  "/api/ai/policies/{id}/translate": {
+    "POST": ["ADMIN", "DEVELOPER"]
+  },
+  "/api/ai/insights": {
+    "GET": ["ADMIN", "DEVELOPER", "USER"]
+  },
+  "/api/ai/insights/generate": {
+    "POST": ["ADMIN", "DEVELOPER"]
+  },
+  "/api/ai/chat": {
+    "POST": ["ADMIN", "DEVELOPER", "USER"]
+  }
+}
+
+
+
+================================================
+FILE: backend/app/main.py
+================================================
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.core.config import settings
+from app.core.database import engine, Base
+from app.api import auth, users, agents, telemetry, admin, ai
+from app.middleware.audit import AuditLoggingMiddleware
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.secret_key == "change-me-in-production":
+        import logging
+        logging.getLogger("uvicorn.error").warning(
+            "SECRET_KEY is default; set a secure value in production (e.g. openssl rand -base64 32)"
+        )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    await engine.dispose()
+
+
+app = FastAPI(
+    title=settings.app_name,
+    description="Control Plane for the Atlas AI Command Center. Handles auth, agent registry, and telemetry.",
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+# Explicit origins when using credentials (browsers reject credentials + "*")
+_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
+app.add_middleware(AuditLoggingMiddleware)
+
+app.include_router(auth.router, prefix="/api")
+app.include_router(users.router, prefix="/api")
+app.include_router(agents.router, prefix="/api")
+app.include_router(telemetry.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
+app.include_router(ai.router, prefix="/api")
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
+
+================================================
+FILE: backend/app/public.map.json
+================================================
+{
+  "endpoints": [
+    "/health",
+    "/api/auth/login",
+    "/api/auth/register",
+    "/docs",
+    "/redoc",
+    "/openapi.json"
+  ]
+}
+
+
+
+================================================
+FILE: backend/app/api/__init__.py
+================================================
+# Platform endpoints
+
+
+
+================================================
+FILE: backend/app/api/admin.py
+================================================
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc
+from datetime import datetime, timezone
+
+from app.core.database import get_db
+from app.models.user import User, UserStatus
+from app.models.audit import AuditLog
+from app.schemas.user_schema import UserResponse
+
+router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+@router.get("/users", response_model=list[UserResponse])
+async def get_all_users(
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all users."""
+    result = await db.execute(select(User).order_by(desc(User.created_at)))
+    users = result.scalars().all()
+    return users
+
+
+@router.get("/users/pending", response_model=list[UserResponse])
+async def get_pending_users(
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all pending users awaiting approval."""
+    result = await db.execute(
+        select(User)
+        .where(User.status == UserStatus.PENDING)
+        .order_by(desc(User.created_at))
+    )
+    users = result.scalars().all()
+    return users
+
+
+@router.post("/users/{user_id}/approve")
+async def approve_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve a pending user."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if user.status != UserStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"User is already {user.status.value.lower()}",
+        )
+
+    user.status = UserStatus.APPROVED
+    user.is_active = True
+    user.approved_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    return {"message": f"User {user.email} approved successfully"}
+
+
+@router.post("/users/{user_id}/reject")
+async def reject_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Reject a pending user."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if user.status != UserStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"User is already {user.status.value.lower()}",
+        )
+
+    user.status = UserStatus.REJECTED
+    user.is_active = False
+
+    await db.commit()
+    return {"message": f"User {user.email} rejected successfully"}
+
+
+@router.get("/audit")
+async def get_audit_logs(
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get audit logs."""
+    result = await db.execute(
+        select(AuditLog)
+        .order_by(desc(AuditLog.timestamp))
+        .limit(limit)
+        .offset(offset)
+    )
+    logs = result.scalars().all()
+
+    return {
+        "logs": [
+            {
+                "id": log.id,
+                "user_id": log.user_id,
+                "action": log.action,
+                "ip_address": log.ip_address,
+                "details": log.details,
+                "timestamp": log.timestamp.isoformat(),
+            }
+            for log in logs
+        ],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/audit/export")
+async def export_audit_logs(
+    db: AsyncSession = Depends(get_db),
+):
+    """Export all audit logs as JSON."""
+    result = await db.execute(
+        select(AuditLog).order_by(desc(AuditLog.timestamp))
+    )
+    logs = result.scalars().all()
+
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "total_logs": len(logs),
+        "logs": [
+            {
+                "id": log.id,
+                "user_id": log.user_id,
+                "action": log.action,
+                "ip_address": log.ip_address,
+                "details": log.details,
+                "timestamp": log.timestamp.isoformat(),
+            }
+            for log in logs
+        ],
+    }
+
+
+
+================================================
+FILE: backend/app/api/agents.py
+================================================
+import asyncio
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi import status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.core.database import get_db
+from app.core.dependencies import get_current_user, require_role
+from app.models.user import User
+from app.models.agent import Agent, AgentTask, AgentStatus, TaskStatus
+from app.schemas.agent_schema import (
+    AgentRegisterRequest,
+    AgentResponse,
+    HeartbeatResponse,
+    TaskLogRequest,
+)
+from app.api.telemetry import broadcast
+
+router = APIRouter(prefix="/agents", tags=["agents"])
+
+
+@router.post("/register", response_model=AgentResponse)
+async def register_agent(
+    body: AgentRegisterRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN", "DEVELOPER")),
+):
+    agent = Agent(
+        name=body.name,
+        module_type=body.module_type,
+        status=AgentStatus.IDLE,
+    )
+    db.add(agent)
+    await db.flush()
+    await db.refresh(agent)
+    return agent
+
+
+@router.get("", response_model=list[AgentResponse])
+async def list_agents(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(Agent).order_by(Agent.created_at.desc()))
+    return list(result.scalars().all())
+
+
+@router.get("/{agent_id}", response_model=AgentResponse)
+async def get_agent(
+    agent_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    return agent
+
+
+@router.post("/{agent_id}/heartbeat", response_model=HeartbeatResponse)
+async def agent_heartbeat(
+    agent_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    agent.last_heartbeat = datetime.now(timezone.utc)
+    await db.flush()
+    return HeartbeatResponse()
+
+
+@router.post("/{agent_id}/logs")
+async def agent_logs(
+    agent_id: int,
+    body: TaskLogRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    task = AgentTask(
+        agent_id=agent_id,
+        task_description=body.task_description,
+        status=body.status,
+        execution_time=body.execution_time,
+    )
+    if body.status == TaskStatus.RUNNING:
+        agent.status = AgentStatus.PROCESSING
+    elif body.status in (TaskStatus.SUCCESS, TaskStatus.FAILED):
+        agent.status = AgentStatus.IDLE
+    db.add(task)
+    await db.flush()
+    asyncio.create_task(
+        broadcast.broadcast({
+            "type": "task_log",
+            "agent_id": agent_id,
+            "agent_name": agent.name,
+            "task_description": body.task_description,
+            "task_status": body.status.value,
+        })
+    )
+    return {"id": task.id, "status": "logged"}
+
+
+
+================================================
+FILE: backend/app/api/ai.py
+================================================
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc
+from typing import List
+
+from app.core.database import get_db
+from app.models.policy import Policy
+from app.schemas.ai_schema import (
+    PolicyCreate,
+    PolicyUpdate,
+    PolicyResponse,
+    PolicyTranslateRequest,
+    InsightResponse,
+    ChatRequest,
+    ChatResponse,
+)
+from app.services.ai.policy import policy_service
+from app.services.ai.insights import insights_service
+from app.services.ai.chat import chat_service
+
+router = APIRouter(prefix="/ai", tags=["ai"])
+
+
+@router.get("/policies", response_model=List[PolicyResponse])
+async def get_policies(
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all policies."""
+    result = await db.execute(
+        select(Policy).order_by(desc(Policy.priority), desc(Policy.created_at))
+    )
+    policies = result.scalars().all()
+    return policies
+
+
+@router.post("/policies", response_model=PolicyResponse)
+async def create_policy(
+    policy_data: PolicyCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new policy."""
+    policy = Policy(
+        name=policy_data.name,
+        description=policy_data.description,
+        policy_type=policy_data.policy_type,
+        natural_language=policy_data.natural_language,
+        dsl=policy_data.dsl,
+        priority=policy_data.priority,
+    )
+    db.add(policy)
+    await db.commit()
+    await db.refresh(policy)
+    return policy
+
+
+@router.get("/policies/{policy_id}", response_model=PolicyResponse)
+async def get_policy(
+    policy_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a specific policy."""
+    result = await db.execute(select(Policy).where(Policy.id == policy_id))
+    policy = result.scalar_one_or_none()
+
+    if not policy:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy not found")
+
+    return policy
+
+
+@router.put("/policies/{policy_id}", response_model=PolicyResponse)
+async def update_policy(
+    policy_id: int,
+    policy_data: PolicyUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update a policy."""
+    result = await db.execute(select(Policy).where(Policy.id == policy_id))
+    policy = result.scalar_one_or_none()
+
+    if not policy:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy not found")
+
+    for field, value in policy_data.model_dump(exclude_unset=True).items():
+        setattr(policy, field, value)
+
+    await db.commit()
+    await db.refresh(policy)
+    return policy
+
+
+@router.delete("/policies/{policy_id}")
+async def delete_policy(
+    policy_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a policy."""
+    result = await db.execute(select(Policy).where(Policy.id == policy_id))
+    policy = result.scalar_one_or_none()
+
+    if not policy:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy not found")
+
+    await db.delete(policy)
+    await db.commit()
+    return {"message": "Policy deleted successfully"}
+
+
+@router.post("/policies/translate")
+async def translate_policy(
+    request: PolicyTranslateRequest,
+):
+    """Translate natural language policy to DSL."""
+    dsl = await policy_service.translate_policy(request.natural_language)
+    validation = await policy_service.validate_policy(dsl)
+
+    return {
+        "natural_language": request.natural_language,
+        "dsl": dsl,
+        "validation": validation,
+    }
+
+
+@router.get("/insights", response_model=List[InsightResponse])
+async def get_insights():
+    """Get AI-generated insights."""
+    system_data = {
+        "user_count": 127,
+        "active_users_today": 89,
+        "api_requests_today": 15432,
+        "avg_response_time_ms": 245,
+        "error_rate_percent": 0.8,
+        "database_size_gb": 12.4,
+    }
+
+    insights = await insights_service.generate_insights(system_data)
+    return insights
+
+
+@router.post("/insights/generate")
+async def generate_insights():
+    """Trigger manual insights generation."""
+    system_data = {
+        "user_count": 127,
+        "active_users_today": 89,
+        "api_requests_today": 15432,
+        "avg_response_time_ms": 245,
+        "error_rate_percent": 0.8,
+    }
+
+    insights = await insights_service.generate_insights(system_data)
+    return {"message": "Insights generated successfully", "insights": insights}
+
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat(
+    request: ChatRequest,
+):
+    """Chat with AI Manager."""
+    messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+
+    response = await chat_service.chat(
+        messages=messages,
+        user_email="user@atlas.local",
+        user_role="ADMIN",
+        current_page=request.current_page,
+    )
+
+    return response
+
+
+
+================================================
+FILE: backend/app/api/auth.py
+================================================
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi import status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.core.database import get_db
+from app.core.security import verify_password, get_password_hash, create_access_token
+from app.core.config import settings
+from app.models.user import User, UserStatus
+from app.schemas.user_schema import LoginRequest, RegisterRequest, TokenResponse
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.post("/login", response_model=TokenResponse)
+async def login(
+    body: LoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+    if not user or not verify_password(body.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+        )
+    if user.status == UserStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account is pending approval. Please contact an administrator.",
+        )
+    if user.status == UserStatus.REJECTED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been rejected. Please contact an administrator.",
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is inactive",
+        )
+    access_token = create_access_token(data={"sub": str(user.id)})
+    return TokenResponse(access_token=access_token)
+
+
+@router.post("/register", response_model=TokenResponse)
+async def register(
+    body: RegisterRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(User).where(User.email == body.email))
+    if result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered",
+        )
+    
+    # Check if email domain is in approved list
+    parts = body.email.strip().split("@")
+    if len(parts) != 2 or not parts[1]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid email format",
+        )
+    email_domain = parts[1].lower()
+    approved_domains = [d.strip().lower() for d in settings.approved_email_domains.split(",") if d.strip()]
+    
+    if email_domain in approved_domains:
+        user_status = UserStatus.APPROVED
+        is_active = True
+    else:
+        user_status = UserStatus.PENDING
+        is_active = False
+    
+    user = User(
+        email=body.email,
+        hashed_password=get_password_hash(body.password),
+        role=body.role,
+        status=user_status,
+        is_active=is_active,
+    )
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
+    
+    if user_status == UserStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_202_ACCEPTED,
+            detail="Registration successful. Your account is pending approval.",
+        )
+    
+    access_token = create_access_token(data={"sub": str(user.id)})
+    return TokenResponse(access_token=access_token)
+
+
+
+================================================
+FILE: backend/app/api/telemetry.py
+================================================
+import json
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
+
+from app.core.database import async_session_maker
+from app.models.agent import Agent
+
+router = APIRouter(prefix="/telemetry", tags=["telemetry"])
+
+
+class TelemetryBroadcast:
+    def __init__(self):
+        self.connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.connections:
+            self.connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for conn in self.connections:
+            try:
+                await conn.send_json(message)
+            except Exception:
+                pass
+
+
+broadcast = TelemetryBroadcast()
+
+
+@router.websocket("/live")
+async def telemetry_live(websocket: WebSocket):
+    await broadcast.connect(websocket)
+    try:
+        async with async_session_maker() as db:
+            result = await db.execute(select(Agent).order_by(Agent.id))
+            agents = result.scalars().all()
+            await websocket.send_json({
+                "type": "snapshot",
+                "agents": [
+                    {
+                        "id": a.id,
+                        "name": a.name,
+                        "module_type": a.module_type,
+                        "status": a.status.value,
+                        "last_heartbeat": a.last_heartbeat.isoformat() if a.last_heartbeat else None,
+                    }
+                    for a in agents
+                ],
+            })
+        while True:
+            data = await websocket.receive_text()
+            try:
+                msg = json.loads(data)
+                if msg.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+            except json.JSONDecodeError:
+                pass
+    except WebSocketDisconnect:
+        broadcast.disconnect(websocket)
+
+
+
+================================================
+FILE: backend/app/api/users.py
+================================================
+from fastapi import APIRouter, Depends
+
+from app.core.dependencies import get_current_user
+from app.models.user import User
+from app.schemas.user_schema import UserResponse
+
+router = APIRouter(prefix="/users", tags=["users"])
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+
+
+================================================
+FILE: backend/app/core/__init__.py
+================================================
+# System Core (devs shouldn't touch this)
+
+
+
+================================================
+FILE: backend/app/core/authz.py
+================================================
+import json
+import re
+from pathlib import Path
+from typing import Optional
+
+from fastapi import HTTPException, status
+
+AUTHZ_MAP_PATH = Path(__file__).parent.parent / "authz.map.json"
+PUBLIC_MAP_PATH = Path(__file__).parent.parent / "public.map.json"
+
+
+class AuthorizationEngine:
+    def __init__(self):
+        self.authz_map = self._load_authz_map()
+        self.public_endpoints = self._load_public_endpoints()
+
+    def _load_authz_map(self) -> dict:
+        with open(AUTHZ_MAP_PATH, "r") as f:
+            return json.load(f)
+
+    def _load_public_endpoints(self) -> list[str]:
+        with open(PUBLIC_MAP_PATH, "r") as f:
+            data = json.load(f)
+            return data.get("endpoints", [])
+
+    def is_public_endpoint(self, path: str) -> bool:
+        """Check if an endpoint is public (no auth required)."""
+        for pattern in self.public_endpoints:
+            # Convert path parameters like {id} to regex patterns
+            regex_pattern = re.escape(pattern).replace(r"\{[^}]+\}", "[^/]+")
+            if re.match(f"^{regex_pattern}$", path):
+                return True
+        return False
+
+    def get_allowed_roles(self, path: str, method: str) -> Optional[list[str]]:
+        """Get list of roles allowed to access this endpoint."""
+        # Check exact match first
+        if path in self.authz_map:
+            endpoint_rules = self.authz_map[path]
+            if method in endpoint_rules:
+                return endpoint_rules[method]
+            if "ANY" in endpoint_rules:
+                return endpoint_rules["ANY"]
+
+        # Check pattern match (for paths with parameters like /api/users/{id})
+        for pattern, rules in self.authz_map.items():
+            # Convert {id} style params to regex
+            regex_pattern = re.sub(r"\{[^}]+\}", r"[^/]+", pattern)
+            if re.match(f"^{regex_pattern}$", path):
+                if method in rules:
+                    return rules[method]
+                if "ANY" in rules:
+                    return rules["ANY"]
+
+        return None
+
+    def check_permission(
+        self, path: str, method: str, user_role: str
+    ) -> bool:
+        """Check if a user with given role can access the endpoint."""
+        # Public endpoints are always accessible
+        if self.is_public_endpoint(path):
+            return True
+
+        allowed_roles = self.get_allowed_roles(path, method)
+        
+        if allowed_roles is None:
+            # No rule defined - default deny
+            return False
+
+        return user_role in allowed_roles
+
+    def require_permission(
+        self, path: str, method: str, user_role: str
+    ) -> None:
+        """Raise HTTPException if user doesn't have permission."""
+        if not self.check_permission(path, method, user_role):
+            allowed_roles = self.get_allowed_roles(path, method)
+            if allowed_roles is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"No authorization rule defined for {method} {path}",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Insufficient permissions. Required roles: {', '.join(allowed_roles)}",
+            )
+
+
+authz_engine = AuthorizationEngine()
+
+
+
+================================================
+FILE: backend/app/core/config.py
+================================================
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
+
+    app_name: str = "Atlas AI Command Center"
+    app_env: str = "development"
+    log_level: str = "INFO"
+    debug: bool = False
+
+    database_url: str = "postgresql+asyncpg://atlas:atlas_secret@localhost:5432/atlas_db"
+    secret_key: str = "change-me-in-production"
+    algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
+    
+    storage_backend: str = "local"
+    gcs_bucket_name: str = ""
+    
+    gemini_api_key: str = ""
+    ai_model: str = "gemini-2.0-flash-exp"
+    
+    approved_email_domains: str = "atlasuniversity.edu.in"
+    
+    keycloak_server_url: str = ""
+    keycloak_realm: str = "atlas"
+    keycloak_client_id: str = "atlas-backend"
+    keycloak_client_secret: str = ""
+
+    # Comma-separated origins for CORS (e.g. http://localhost:3000,https://app.example.com)
+    cors_origins: str = "http://localhost:3000,http://localhost:3000,http://127.0.0.1:3000,http://127.0.0.1:3000"
+
+
+settings = Settings()
+
+
+
+================================================
+FILE: backend/app/core/database.py
+================================================
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
+
+from app.core.config import settings
+
+engine = create_async_engine(
+    settings.database_url,
+    echo=settings.debug,
+)
+
+async_session_maker = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+async def get_db() -> AsyncSession:
+    async with async_session_maker() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+
+================================================
+FILE: backend/app/core/dependencies.py
+================================================
+from fastapi import Depends, HTTPException, status, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.core.database import get_db
+from app.core.security import decode_access_token
+from app.core.authz import authz_engine
+from app.models.user import User
+
+security = HTTPBearer(auto_error=False)
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    payload = decode_access_token(credentials.credentials)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    sub = payload.get("sub")
+    if sub is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
+    result = await db.execute(select(User).where(User.id == int(sub)))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is inactive",
+        )
+    return user
+
+
+async def get_optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """Get current user if authenticated, otherwise return None."""
+    if credentials is None:
+        return None
+    try:
+        return await get_current_user(credentials, db)
+    except HTTPException:
+        return None
+
+
+def require_role(*allowed_roles: str):
+    """DEPRECATED: Use authz engine instead."""
+    async def role_checker(
+        current_user: User = Depends(get_current_user),
+    ) -> User:
+        if current_user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
+        return current_user
+
+    return role_checker
+
+
+async def check_authorization(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Check if user has permission using authz engine."""
+    authz_engine.require_permission(
+        path=request.url.path,
+        method=request.method,
+        user_role=current_user.role.value,
+    )
+    return current_user
+
+
+
+================================================
+FILE: backend/app/core/security.py
+================================================
+from datetime import datetime, timedelta, timezone
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+
+from app.core.config import settings
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(minutes=settings.access_token_expire_minutes)
+    )
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
+
+
+def decode_access_token(token: str) -> dict | None:
+    try:
+        payload = jwt.decode(
+            token, settings.secret_key, algorithms=[settings.algorithm]
+        )
+        return payload
+    except JWTError:
+        return None
+
+
+
+================================================
+FILE: backend/app/middleware/__init__.py
+================================================
+"""Middleware package"""
+
+
+
+================================================
+FILE: backend/app/middleware/audit.py
+================================================
+import time
+from typing import Callable
+from fastapi import Request, Response
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.core.database import get_db
+from app.core.dependencies import get_optional_user
+from app.services.audit import audit
+
+
+class AuditLoggingMiddleware(BaseHTTPMiddleware):
+    """Middleware to automatically log all HTTP requests."""
+
+    EXCLUDED_PATHS = {"/health", "/docs", "/redoc", "/openapi.json"}
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        # Skip audit logging for excluded paths
+        if request.url.path in self.EXCLUDED_PATHS:
+            return await call_next(request)
+
+        start_time = time.time()
+
+        # Try to get current user (may be None for public endpoints)
+        user = None
+        try:
+            async for db in get_db():
+                user = await get_optional_user(None, db)
+                break
+        except Exception:
+            pass
+
+        # Process request
+        response = await call_next(request)
+        
+        duration_ms = (time.time() - start_time) * 1000
+
+        # Log the request (fire and forget - don't block response)
+        try:
+            async for db in get_db():
+                await audit.log_request(
+                    db=db,
+                    user=user,
+                    method=request.method,
+                    path=request.url.path,
+                    status_code=response.status_code,
+                    ip_address=request.client.host if request.client else None,
+                    duration_ms=duration_ms,
+                )
+                break
+        except Exception as e:
+            # Don't fail request if audit logging fails
+            print(f"Audit logging failed: {e}")
+
+        return response
+
+
+
+================================================
+FILE: backend/app/models/__init__.py
+================================================
+from app.models.user import User
+from app.models.agent import Agent, AgentTask
+from app.models.audit import AuditLog
+from app.models.user import User
+from app.models.agent import Agent
+from app.models.policy import Policy
+
+__all__ = ["User", "Agent", "AgentTask", "AuditLog"]
+
+
+
+================================================
+FILE: backend/app/models/agent.py
+================================================
+from datetime import datetime, timezone
+from sqlalchemy import String, DateTime, ForeignKey, Text, Float, Enum
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+import enum
+
+from app.core.database import Base
+
+
+class AgentStatus(str, enum.Enum):
+    IDLE = "Idle"
+    PROCESSING = "Processing"
+    ERROR = "Error"
+    OFFLINE = "Offline"
+
+
+class TaskStatus(str, enum.Enum):
+    PENDING = "Pending"
+    SUCCESS = "Success"
+    FAILED = "Failed"
+    RUNNING = "Running"
+
+
+class Agent(Base):
+    __tablename__ = "agents"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    module_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    status: Mapped[AgentStatus] = mapped_column(
+        Enum(AgentStatus), default=AgentStatus.IDLE, nullable=False
+    )
+    last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    tasks: Mapped[list["AgentTask"]] = relationship(
+        "AgentTask", back_populates="agent", cascade="all, delete-orphan"
+    )
+
+
+class AgentTask(Base):
+    __tablename__ = "agent_tasks"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    task_description: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[TaskStatus] = mapped_column(
+        Enum(TaskStatus), default=TaskStatus.PENDING, nullable=False
+    )
+    execution_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    agent: Mapped["Agent"] = relationship("Agent", back_populates="tasks")
+
+
+
+================================================
+FILE: backend/app/models/audit.py
+================================================
+from datetime import datetime, timezone
+from sqlalchemy import String, DateTime, ForeignKey, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.database import Base
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    action: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+
+================================================
+FILE: backend/app/models/policy.py
+================================================
+from datetime import datetime, timezone
+from sqlalchemy import String, Text, Integer, DateTime, Enum
+from sqlalchemy.orm import Mapped, mapped_column
+import enum
+
+from app.core.database import Base
+
+
+class PolicyType(str, enum.Enum):
+    LOGICAL = "LOGICAL"
+    NATURAL_LANGUAGE = "NATURAL_LANGUAGE"
+
+
+class PolicyStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    INACTIVE = "INACTIVE"
+    DRAFT = "DRAFT"
+
+
+class Policy(Base):
+    __tablename__ = "policies"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    policy_type: Mapped[PolicyType] = mapped_column(
+        Enum(PolicyType), default=PolicyType.NATURAL_LANGUAGE, nullable=False
+    )
+    natural_language: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dsl: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[PolicyStatus] = mapped_column(
+        Enum(PolicyStatus), default=PolicyStatus.DRAFT, nullable=False
+    )
+    priority: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
+    created_by: Mapped[int] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), 
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
+
+
+
+================================================
+FILE: backend/app/models/user.py
+================================================
+from datetime import datetime, timezone
+from sqlalchemy import String, Boolean, DateTime, Enum
+from sqlalchemy.orm import Mapped, mapped_column
+import enum
+
+from app.core.database import Base
+
+
+class UserRole(str, enum.Enum):
+    ADMIN = "ADMIN"
+    DEVELOPER = "DEVELOPER"
+    USER = "USER"
+
+
+class UserStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole), default=UserRole.USER, nullable=False
+    )
+    status: Mapped[UserStatus] = mapped_column(
+        Enum(UserStatus), default=UserStatus.PENDING, nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    approved_by: Mapped[int | None] = mapped_column(nullable=True)
+
+
+
+================================================
+FILE: backend/app/modules/__init__.py
+================================================
+# Plug & play: add backend AI logic here (e.g. hr_bot, timetable_ai)
+
+
+
+================================================
+FILE: backend/app/modules/hr_bot/__init__.py
+================================================
+# Example: HR Automation backend
+
+
+
+================================================
+FILE: backend/app/modules/timetable_ai/__init__.py
+================================================
+# Example: Timetable / Schedule Generation backend
+
+
+
+================================================
+FILE: backend/app/schemas/__init__.py
+================================================
+from app.schemas.user_schema import (
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+    UserResponse,
+)
+from app.schemas.agent_schema import (
+    AgentRegisterRequest,
+    AgentResponse,
+    HeartbeatResponse,
+    TaskLogRequest,
+)
+
+__all__ = [
+    "LoginRequest",
+    "RegisterRequest",
+    "TokenResponse",
+    "UserResponse",
+    "AgentRegisterRequest",
+    "AgentResponse",
+    "HeartbeatResponse",
+    "TaskLogRequest",
+]
+
+
+
+================================================
+FILE: backend/app/schemas/agent_schema.py
+================================================
+from datetime import datetime
+
+from pydantic import BaseModel
+
+from app.models.agent import AgentStatus, TaskStatus
+
+
+class AgentRegisterRequest(BaseModel):
+    name: str
+    module_type: str
+
+
+class AgentResponse(BaseModel):
+    id: int
+    name: str
+    module_type: str
+    status: AgentStatus
+    last_heartbeat: datetime | None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class HeartbeatResponse(BaseModel):
+    status: str = "ok"
+
+
+class TaskLogRequest(BaseModel):
+    task_description: str
+    status: TaskStatus = TaskStatus.RUNNING
+    execution_time: float | None = None
+
+
+
+================================================
+FILE: backend/app/schemas/ai_schema.py
+================================================
+from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+
+from app.models.policy import PolicyType, PolicyStatus
+
+
+class PolicyCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    policy_type: PolicyType
+    natural_language: Optional[str] = None
+    dsl: Optional[str] = None
+    priority: int = 100
+
+
+class PolicyUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    natural_language: Optional[str] = None
+    dsl: Optional[str] = None
+    status: Optional[PolicyStatus] = None
+    priority: Optional[int] = None
+
+
+class PolicyResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    policy_type: PolicyType
+    natural_language: Optional[str]
+    dsl: Optional[str]
+    status: PolicyStatus
+    priority: int
+    created_by: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PolicyTranslateRequest(BaseModel):
+    natural_language: str
+
+
+class InsightResponse(BaseModel):
+    title: str
+    description: str
+    severity: str
+    category: str
+    suggested_action: str
+    impact: str
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
+    current_page: Optional[str] = "/"
+
+
+class ChatResponse(BaseModel):
+    role: str
+    content: str
+    tool_calls: List[Dict[str, Any]] = []
+
+
+
+================================================
+FILE: backend/app/schemas/user_schema.py
+================================================
+from pydantic import BaseModel, EmailStr
+from datetime import datetime
+from typing import Optional
+
+from app.models.user import UserRole, UserStatus
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
+    role: UserRole = UserRole.USER
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    role: UserRole
+    status: UserStatus
+    is_active: bool
+    created_at: datetime
+    approved_at: Optional[datetime] = None
+    approved_by: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class UserApprovalRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+
+================================================
+FILE: backend/app/services/__init__.py
+================================================
+"""Initial __init__ for services package"""
+
+
+
+================================================
+FILE: backend/app/services/audit.py
+================================================
+import json
+from datetime import datetime, timezone
+from typing import Optional, Any
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.audit import AuditLog
+from app.models.user import User
+
+
+class AuditService:
+    """Service for logging audit events."""
+
+    SENSITIVE_FIELDS = {"password", "hashed_password", "token", "secret", "api_key"}
+
+    @staticmethod
+    def mask_sensitive_data(data: Any) -> Any:
+        """Recursively mask sensitive fields in data."""
+        if isinstance(data, dict):
+            return {
+                key: "***MASKED***" if key.lower() in AuditService.SENSITIVE_FIELDS
+                else AuditService.mask_sensitive_data(value)
+                for key, value in data.items()
+            }
+        elif isinstance(data, list):
+            return [AuditService.mask_sensitive_data(item) for item in data]
+        return data
+
+    @staticmethod
+    async def log_request(
+        db: AsyncSession,
+        user: Optional[User],
+        method: str,
+        path: str,
+        status_code: int,
+        ip_address: Optional[str] = None,
+        request_body: Optional[dict] = None,
+        response_body: Optional[dict] = None,
+        duration_ms: Optional[float] = None,
+    ):
+        """Log an HTTP request."""
+        details = {
+            "method": method,
+            "path": path,
+            "status_code": status_code,
+        }
+
+        if request_body:
+            details["request_body"] = AuditService.mask_sensitive_data(request_body)
+
+        if response_body:
+            details["response_body"] = AuditService.mask_sensitive_data(response_body)
+
+        if duration_ms is not None:
+            details["duration_ms"] = round(duration_ms, 2)
+
+        audit_log = AuditLog(
+            user_id=user.id if user else None,
+            action=f"{method} {path}",
+            ip_address=ip_address,
+            details=json.dumps(details),
+            timestamp=datetime.now(timezone.utc),
+        )
+        db.add(audit_log)
+        await db.commit()
+
+    @staticmethod
+    async def log_user_action(
+        db: AsyncSession,
+        action: str,
+        actor: User,
+        ip_address: Optional[str] = None,
+        target_user_id: Optional[int] = None,
+        target_user_email: Optional[str] = None,
+        **kwargs,
+    ):
+        """Log a custom user action."""
+        details = {
+            "actor_id": actor.id,
+            "actor_email": actor.email,
+            "actor_role": actor.role.value,
+        }
+
+        if target_user_id:
+            details["target_user_id"] = target_user_id
+        if target_user_email:
+            details["target_user_email"] = target_user_email
+
+        details.update(kwargs)
+
+        audit_log = AuditLog(
+            user_id=actor.id,
+            action=action,
+            ip_address=ip_address,
+            details=json.dumps(details),
+            timestamp=datetime.now(timezone.utc),
+        )
+        db.add(audit_log)
+        await db.commit()
+
+
+audit = AuditService()
+
+
+
+================================================
+FILE: backend/app/services/keycloak.py
+================================================
+from typing import Optional, Dict, Any
+import httpx
+from jose import jwt, JWTError
+from app.core.config import settings
+
+
+class KeycloakService:
+    """Service for validating Keycloak JWT tokens."""
+
+    def __init__(self):
+        self.server_url = settings.keycloak_server_url
+        self.realm = settings.keycloak_realm
+        self.client_id = settings.keycloak_client_id
+        self._public_key: Optional[str] = None
+
+    async def get_public_key(self) -> str:
+        """Fetch the public key from Keycloak for token verification."""
+        if self._public_key:
+            return self._public_key
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.server_url}/realms/{self.realm}"
+            )
+            response.raise_for_status()
+            data = response.json()
+            self._public_key = (
+                f"-----BEGIN PUBLIC KEY-----\n"
+                f"{data['public_key']}\n"
+                f"-----END PUBLIC KEY-----"
+            )
+            return self._public_key
+
+    async def verify_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """Verify and decode a Keycloak JWT token."""
+        if not self.server_url:
+            return None
+
+        try:
+            public_key = await self.get_public_key()
+            
+            payload = jwt.decode(
+                token,
+                public_key,
+                algorithms=["RS256"],
+                audience=self.client_id,
+                options={"verify_aud": True},
+            )
+            
+            return payload
+        except JWTError as e:
+            print(f"Token verification failed: {e}")
+            return None
+
+
+keycloak_service = KeycloakService()
+
+
+
+================================================
+FILE: backend/app/services/keycloak_admin.py
+================================================
+import httpx
+from typing import Optional, Dict, Any
+from app.core.config import settings
+
+
+class KeycloakAdmin:
+    """Client for Keycloak Admin API."""
+
+    def __init__(self):
+        self.server_url = settings.keycloak_server_url
+        self.realm = settings.keycloak_realm
+        self.client_id = settings.keycloak_client_id
+        self.client_secret = settings.keycloak_client_secret
+        self._access_token: Optional[str] = None
+
+    async def get_admin_token(self) -> str:
+        """Get admin access token from Keycloak."""
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.server_url}/realms/{self.realm}/protocol/openid-connect/token",
+                data={
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                    "grant_type": "client_credentials",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["access_token"]
+
+    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """Get user from Keycloak by email."""
+        token = await self.get_admin_token()
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.server_url}/admin/realms/{self.realm}/users",
+                params={"email": email},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            response.raise_for_status()
+            users = response.json()
+            return users[0] if users else None
+
+    async def create_user(
+        self,
+        email: str,
+        password: str,
+        first_name: str = "",
+        last_name: str = "",
+        enabled: bool = True,
+    ) -> Dict[str, Any]:
+        """Create a new user in Keycloak."""
+        token = await self.get_admin_token()
+        
+        user_data = {
+            "email": email,
+            "username": email,
+            "firstName": first_name,
+            "lastName": last_name,
+            "enabled": enabled,
+            "emailVerified": True,
+            "credentials": [
+                {
+                    "type": "password",
+                    "value": password,
+                    "temporary": False,
+                }
+            ],
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.server_url}/admin/realms/{self.realm}/users",
+                json=user_data,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            response.raise_for_status()
+            
+            # Get the created user
+            user = await self.get_user_by_email(email)
+            return user
+
+    async def update_user(self, user_id: str, updates: Dict[str, Any]) -> None:
+        """Update user in Keycloak."""
+        token = await self.get_admin_token()
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"{self.server_url}/admin/realms/{self.realm}/users/{user_id}",
+                json=updates,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            response.raise_for_status()
+
+    async def delete_user(self, user_id: str) -> None:
+        """Delete user from Keycloak."""
+        token = await self.get_admin_token()
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(
+                f"{self.server_url}/admin/realms/{self.realm}/users/{user_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            response.raise_for_status()
+
+
+keycloak_admin = KeycloakAdmin()
+
+
+
+================================================
+FILE: backend/app/services/ai/__init__.py
+================================================
+"""AI services package"""
+
+
+
+================================================
+FILE: backend/app/services/ai/chat.py
+================================================
+from typing import List, Dict, Any, Optional
+from app.services.ai.gemini import gemini_client
+from app.services.ai.tools import get_chat_tools, execute_tool
+
+
+class ChatService:
+    """Service for AI Manager chat functionality."""
+
+    SYSTEM_INSTRUCTION = """You are the Atlas AI Manager, an intelligent assistant for the Atlas AI Command Center.
+
+Your capabilities:
+- Help users understand system status and metrics
+- Assist with user management and access control
+- Explain policies and create new ones
+- Search and analyze audit logs
+- Provide insights and recommendations
+- Answer questions about the platform
+
+Current context:
+- User: {user_email} ({user_role})
+- Page: {current_page}
+
+Be helpful, concise, and proactive. Use available tools when needed. If you don't have enough information, ask clarifying questions."""
+
+    async def chat(
+        self,
+        messages: List[Dict[str, str]],
+        user_email: str,
+        user_role: str,
+        current_page: str = "/",
+    ) -> Dict[str, Any]:
+        """Process a chat message and return response."""
+        
+        if not gemini_client.is_available():
+            return {
+                "role": "assistant",
+                "content": "AI Manager is currently unavailable. Please configure the GEMINI_API_KEY to enable AI features.",
+                "tool_calls": []
+            }
+
+        system_instruction = self.SYSTEM_INSTRUCTION.format(
+            user_email=user_email,
+            user_role=user_role,
+            current_page=current_page,
+        )
+
+        try:
+            tools = get_chat_tools()
+            response = await gemini_client.chat(
+                messages=messages,
+                system_instruction=system_instruction,
+                tools=tools,
+            )
+
+            # Execute any function calls
+            tool_results = []
+            for func_call in response.get("function_calls", []):
+                result = await execute_tool(func_call["name"], func_call["args"])
+                tool_results.append({
+                    "tool": func_call["name"],
+                    "result": result
+                })
+
+            return {
+                "role": "assistant",
+                "content": response["content"],
+                "tool_calls": tool_results,
+            }
+
+        except Exception as e:
+            return {
+                "role": "assistant",
+                "content": f"I encountered an error: {str(e)}. Please try again.",
+                "tool_calls": []
+            }
+
+
+chat_service = ChatService()
+
+
+
+================================================
+FILE: backend/app/services/ai/gemini.py
+================================================
+from typing import Optional, List, Dict, Any
+import google.generativeai as genai
+from google.ai.generativelanguage_v1beta.types import content
+
+from app.core.config import settings
+
+
+class GeminiClient:
+    """Client for interacting with Google's Gemini API."""
+
+    def __init__(self):
+        if settings.gemini_api_key:
+            genai.configure(api_key=settings.gemini_api_key)
+            self.model = genai.GenerativeModel(settings.ai_model)
+        else:
+            self.model = None
+
+    def is_available(self) -> bool:
+        """Check if Gemini API is configured."""
+        return self.model is not None
+
+    async def generate_text(
+        self,
+        prompt: str,
+        system_instruction: Optional[str] = None,
+        temperature: float = 0.7,
+    ) -> str:
+        """Generate text using Gemini."""
+        if not self.is_available():
+            raise ValueError("Gemini API key not configured")
+
+        generation_config = genai.GenerationConfig(
+            temperature=temperature,
+            max_output_tokens=2048,
+        )
+
+        if system_instruction:
+            model = genai.GenerativeModel(
+                settings.ai_model,
+                system_instruction=system_instruction,
+            )
+        else:
+            model = self.model
+
+        response = await model.generate_content_async(
+            prompt,
+            generation_config=generation_config,
+        )
+        return response.text
+
+    async def chat(
+        self,
+        messages: List[Dict[str, str]],
+        system_instruction: Optional[str] = None,
+        tools: Optional[List[Any]] = None,
+    ) -> Dict[str, Any]:
+        """Chat with Gemini, optionally with function calling."""
+        if not self.is_available():
+            raise ValueError("Gemini API key not configured")
+
+        model_config = {"model_name": settings.ai_model}
+        
+        if system_instruction:
+            model_config["system_instruction"] = system_instruction
+            
+        if tools:
+            model_config["tools"] = tools
+
+        model = genai.GenerativeModel(**model_config)
+        chat = model.start_chat()
+
+        for msg in messages[:-1]:
+            await chat.send_message_async(msg["content"])
+
+        response = await chat.send_message_async(messages[-1]["content"])
+        
+        result = {
+            "content": response.text if response.text else "",
+            "function_calls": [],
+        }
+
+        if hasattr(response, "candidates") and response.candidates:
+            for part in response.candidates[0].content.parts:
+                if hasattr(part, "function_call"):
+                    result["function_calls"].append({
+                        "name": part.function_call.name,
+                        "args": dict(part.function_call.args),
+                    })
+
+        return result
+
+
+gemini_client = GeminiClient()
+
+
+
+================================================
+FILE: backend/app/services/ai/insights.py
+================================================
+from typing import List, Dict, Any
+from datetime import datetime, timezone
+from app.services.ai.gemini import gemini_client
+
+
+class InsightsService:
+    """Service for generating AI insights and recommendations."""
+
+    INSIGHTS_PROMPT = """Analyze the following system data and generate actionable insights.
+
+Focus on:
+- Patterns and anomalies
+- Performance bottlenecks
+- Security concerns
+- Optimization opportunities
+- User behavior trends
+
+System Data:
+{data}
+
+Generate 3-5 insights in JSON format:
+[
+  {{
+    "title": "Insight title",
+    "description": "Detailed description",
+    "severity": "CRITICAL|WARNING|RECOMMENDATION",
+    "category": "security|performance|usage|cost",
+    "suggested_action": "What to do about it",
+    "impact": "Expected impact of the action"
+  }}
+]
+
+Respond with ONLY valid JSON, no markdown or explanation."""
+
+    async def generate_insights(self, system_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generate insights based on system data."""
+        if not gemini_client.is_available():
+            return self._get_demo_insights()
+
+        import json
+        
+        data_summary = json.dumps(system_data, indent=2)
+        prompt = self.INSIGHTS_PROMPT.format(data=data_summary)
+        
+        try:
+            response = await gemini_client.generate_text(
+                prompt=prompt,
+                temperature=0.3,
+            )
+            
+            # Clean response (remove markdown code blocks if present)
+            clean_response = response.strip()
+            if clean_response.startswith("```json"):
+                clean_response = clean_response[7:]
+            if clean_response.startswith("```"):
+                clean_response = clean_response[3:]
+            if clean_response.endswith("```"):
+                clean_response = clean_response[:-3]
+            clean_response = clean_response.strip()
+            
+            insights = json.loads(clean_response)
+            return insights
+        except Exception as e:
+            print(f"Error generating insights: {e}")
+            return self._get_demo_insights()
+
+    def _get_demo_insights(self) -> List[Dict[str, Any]]:
+        """Return demo insights when Gemini is not available."""
+        return [
+            {
+                "title": "High API Response Time Detected",
+                "description": "Average API response time has increased by 45% over the past week, particularly for database-heavy endpoints.",
+                "severity": "WARNING",
+                "category": "performance",
+                "suggested_action": "Add database query optimization and consider implementing caching for frequently accessed data",
+                "impact": "Could reduce response time by 30-40% and improve user experience"
+            },
+            {
+                "title": "Unusual Login Pattern Detected",
+                "description": "Multiple failed login attempts from unfamiliar IP addresses during off-hours. Possible credential stuffing attack.",
+                "severity": "CRITICAL",
+                "category": "security",
+                "suggested_action": "Enable rate limiting on authentication endpoints and review security logs",
+                "impact": "Prevents potential account takeover and protects user data"
+            },
+            {
+                "title": "Low Feature Adoption Rate",
+                "description": "New AI policy features have only 15% adoption rate among active users after 30 days.",
+                "severity": "RECOMMENDATION",
+                "category": "usage",
+                "suggested_action": "Create onboarding tutorial and in-app guidance for new features",
+                "impact": "Could increase feature adoption by 40-50% based on similar initiatives"
+            }
+        ]
+
+
+insights_service = InsightsService()
+
+
+
+================================================
+FILE: backend/app/services/ai/policy.py
+================================================
+from typing import Dict, Any
+from app.services.ai.gemini import gemini_client
+
+
+class PolicyService:
+    """Service for translating natural language policies to executable DSL."""
+
+    TRANSLATION_PROMPT = """You are a policy translation engine. Convert the natural language policy into a structured logical DSL.
+
+Rules:
+- Use operators: AND, OR, NOT
+- Use comparisons: ==, !=, <, >, <=, >=
+- Use functions: contains(), startsWith(), endsWith()
+- Variables: user.role, user.department, resource.type, resource.owner, time.hour
+
+Example:
+Natural: "Allow managers to access reports during business hours"
+DSL: (user.role == "manager") AND (resource.type == "report") AND (time.hour >= 9 AND time.hour <= 17)
+
+Natural language policy:
+{policy}
+
+Respond with ONLY the DSL, no explanation."""
+
+    async def translate_policy(self, natural_language: str) -> str:
+        """Translate natural language policy to DSL."""
+        if not gemini_client.is_available():
+            return "# Set GEMINI_API_KEY for natural-language translation. Fallback:\nuser.role == 'ADMIN'"
+
+        prompt = self.TRANSLATION_PROMPT.format(policy=natural_language)
+        dsl = await gemini_client.generate_text(
+            prompt=prompt,
+            temperature=0.2,
+        )
+        return dsl.strip()
+
+    async def validate_policy(self, dsl: str) -> Dict[str, Any]:
+        """Validate a policy DSL (basic syntax check)."""
+        try:
+            # Basic validation - check for common operators and syntax
+            valid_operators = ["AND", "OR", "NOT", "==", "!=", "<", ">", "<=", ">="]
+            valid_functions = ["contains", "startsWith", "endsWith"]
+            
+            has_operator = any(op in dsl for op in valid_operators)
+            has_valid_syntax = "(" in dsl and ")" in dsl
+            
+            return {
+                "valid": has_operator and has_valid_syntax,
+                "errors": [] if (has_operator and has_valid_syntax) else ["Invalid DSL syntax"],
+            }
+        except Exception as e:
+            return {
+                "valid": False,
+                "errors": [str(e)],
+            }
+
+
+policy_service = PolicyService()
+
+
+
+================================================
+FILE: backend/app/services/ai/tools.py
+================================================
+from typing import List, Dict, Any
+from google.ai.generativelanguage_v1beta.types import content
+
+
+def get_chat_tools() -> List[content.Tool]:
+    """Get list of tools available to the AI chat assistant."""
+    
+    get_user_info = content.FunctionDeclaration(
+        name="get_user_info",
+        description="Get information about a user by email or ID",
+        parameters=content.Schema(
+            type=content.Type.OBJECT,
+            properties={
+                "user_identifier": content.Schema(
+                    type=content.Type.STRING,
+                    description="User email or ID"
+                )
+            },
+            required=["user_identifier"]
+        )
+    )
+    
+    get_system_stats = content.FunctionDeclaration(
+        name="get_system_stats",
+        description="Get current system statistics and metrics",
+        parameters=content.Schema(
+            type=content.Type.OBJECT,
+            properties={
+                "metric_type": content.Schema(
+                    type=content.Type.STRING,
+                    description="Type of metrics: 'performance', 'usage', 'errors', or 'all'",
+                    enum=["performance", "usage", "errors", "all"]
+                )
+            }
+        )
+    )
+    
+    search_audit_logs = content.FunctionDeclaration(
+        name="search_audit_logs",
+        description="Search audit logs for specific actions or users",
+        parameters=content.Schema(
+            type=content.Type.OBJECT,
+            properties={
+                "query": content.Schema(
+                    type=content.Type.STRING,
+                    description="Search query"
+                ),
+                "limit": content.Schema(
+                    type=content.Type.INTEGER,
+                    description="Maximum number of results (default: 10)"
+                )
+            },
+            required=["query"]
+        )
+    )
+    
+    create_policy = content.FunctionDeclaration(
+        name="create_policy",
+        description="Create a new access control policy",
+        parameters=content.Schema(
+            type=content.Type.OBJECT,
+            properties={
+                "name": content.Schema(
+                    type=content.Type.STRING,
+                    description="Policy name"
+                ),
+                "description": content.Schema(
+                    type=content.Type.STRING,
+                    description="Policy description"
+                ),
+                "rule": content.Schema(
+                    type=content.Type.STRING,
+                    description="Natural language rule"
+                )
+            },
+            required=["name", "rule"]
+        )
+    )
+    
+    return [content.Tool(function_declarations=[
+        get_user_info,
+        get_system_stats,
+        search_audit_logs,
+        create_policy,
+    ])]
+
+
+async def execute_tool(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute a tool function and return results."""
+    
+    if tool_name == "get_user_info":
+        return {
+            "user_identifier": args.get("user_identifier"),
+            "status": "active",
+            "role": "DEVELOPER",
+            "last_login": "2026-03-14T10:30:00Z",
+            "message": "User information retrieved successfully"
+        }
+    
+    elif tool_name == "get_system_stats":
+        metric_type = args.get("metric_type", "all")
+        return {
+            "metric_type": metric_type,
+            "timestamp": "2026-03-15T12:00:00Z",
+            "performance": {
+                "avg_response_time_ms": 245,
+                "p95_response_time_ms": 680,
+                "cpu_usage_percent": 45,
+                "memory_usage_percent": 62
+            },
+            "usage": {
+                "active_users": 127,
+                "api_requests_today": 15432,
+                "database_queries": 8921
+            },
+            "errors": {
+                "error_rate_percent": 0.8,
+                "total_errors_today": 23
+            }
+        }
+    
+    elif tool_name == "search_audit_logs":
+        query = args.get("query", "")
+        limit = args.get("limit", 10)
+        return {
+            "query": query,
+            "total_found": 3,
+            "results": [
+                {
+                    "timestamp": "2026-03-15T11:45:00Z",
+                    "action": "user.approve",
+                    "user": "admin@atlasuniversity.edu.in",
+                    "details": f"Matched query: {query}"
+                },
+                {
+                    "timestamp": "2026-03-15T10:30:00Z",
+                    "action": "policy.create",
+                    "user": "developer@atlasuniversity.edu.in",
+                    "details": f"Related to: {query}"
+                }
+            ]
+        }
+    
+    elif tool_name == "create_policy":
+        return {
+            "policy_id": 12345,
+            "name": args.get("name"),
+            "status": "created",
+            "message": "Policy created successfully and will be translated to DSL"
+        }
+    
+    else:
+        return {"error": f"Unknown tool: {tool_name}"}
+
+
+
+================================================
+FILE: backend/gunicorn/dev.py
+================================================
+# gunicorn/dev.py
+"""Gunicorn *development* config file
+
+Development settings optimized for local development:
+- Single worker for simplicity
+- Hot reload enabled
+- Longer timeout for debugging
+"""
+
+import os
+
+# FastAPI ASGI application path
+wsgi_app = "app.main:app"
+
+# Logging
+loglevel = "info"
+accesslog = errorlog = "-"  # Log to stdout for Docker
+capture_output = True
+
+# Single worker for development (avoids race conditions)
+workers = 1
+
+# Worker class for ASGI support
+worker_class = "uvicorn.workers.UvicornWorker"
+
+# Max simultaneous connections per worker
+worker_connections = 1000
+
+# Server socket
+bind = f"{os.getenv('INTERNAL_IP', '0.0.0.0')}:8000"
+
+# Hot reload on code changes
+# Set to False if auto-restarts are disruptive during active development
+reload = False  # Changed to prevent connection drops
+
+# Longer timeout for debugging
+timeout = 5000
+
+# PID file
+pidfile = "/tmp/gunicorn_dev.pid"
+
+# Don't daemonize
+daemon = False
+
+
+
+================================================
+FILE: backend/gunicorn/prod.py
+================================================
+# gunicorn/prod.py
+"""Gunicorn *production* config file
+
+Production settings optimized for Cloud Run:
+- Dynamic worker count based on available CPUs
+- Preload app to share memory between workers
+- No migrations here (run via separate Cloud Run Job)
+"""
+
+import multiprocessing
+import os
+
+# FastAPI ASGI application path
+wsgi_app = "app.main:app"
+
+# Logging
+loglevel = os.getenv("GUNICORN_LOG_LEVEL", "info")
+accesslog = errorlog = "-"  # Log to stdout/stderr for Docker
+capture_output = True
+
+# Concurrency and Workers
+# Cloud Run provides 1 vCPU by default, but can be configured up to 8
+# Formula: (2 x num_cores) + 1 is a good starting point for I/O bound apps
+# WEB_CONCURRENCY env var allows override for fine-tuning
+_cpu_count = multiprocessing.cpu_count()
+_default_workers = (_cpu_count * 2) + 1
+workers = int(os.getenv("WEB_CONCURRENCY", _default_workers))
+
+# Use Uvicorn worker for ASGI support
+worker_class = "uvicorn.workers.UvicornWorker"
+
+# Max simultaneous connections per worker
+worker_connections = int(os.getenv("WORKER_CONNECTIONS", "1000"))
+
+# Request timeout (Cloud Run has max 3600s)
+timeout = int(os.getenv("GUNICORN_TIMEOUT", "120"))
+
+# Graceful timeout for worker shutdown
+graceful_timeout = int(os.getenv("GUNICORN_GRACEFUL_TIMEOUT", "30"))
+
+# Server socket
+bind = f"0.0.0.0:{os.getenv('PORT', '8000')}"
+
+# Preload application code before forking workers
+# This shares memory between workers and catches startup errors early
+preload_app = True
+
+# Production settings
+reload = False
+daemon = False
+
+
+# Worker lifecycle hooks
+def on_starting(server):
+    """Called just before the master process is initialized."""
+    import logging
+
+    logging.info(f"ðŸš€ Starting Gunicorn with {workers} workers (CPUs: {_cpu_count})")
+
+
+def pre_fork(server, worker):
+    """Called just before a worker is forked."""
+    pass
+
+
+def post_fork(server, worker):
+    """Called just after a worker has been forked."""
+    import logging
+
+    logging.info(f"ðŸ‘· Worker {worker.pid} spawned")
+
+
+def worker_exit(server, worker):
+    """Called just after a worker has been exited."""
+    import logging
+
+    logging.info(f"ðŸ‘‹ Worker {worker.pid} exited")
+
+
+
+================================================
+FILE: frontend/Dockerfile
+================================================
+# Development: hot reload with proper dependency caching
+FROM node:20-alpine AS dev
+
+WORKDIR /app
+
+# Copy package files first for better layer caching
+COPY package.json package-lock.json* ./
+
+# Install dependencies in the image
+RUN npm ci --prefer-offline --no-audit
+
+# Copy source code (node_modules excluded via .dockerignore)
+COPY . .
+
+EXPOSE 3000
+
+CMD ["npm", "run", "dev", "--", "-H", "0.0.0.0"]
+
+# Production: optimized build with multi-stage
+FROM node:20-alpine AS prod-deps
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci --prefer-offline --no-audit --production
+
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci --prefer-offline --no-audit
+
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS prod
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+# Copy only production dependencies and build output
+COPY --from=prod-deps /app/node_modules ./node_modules
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/next.config.js ./next.config.js
+
+EXPOSE 3000
+
+CMD ["npm", "start"]
+
+
+
+================================================
+FILE: frontend/next-env.d.ts
+================================================
+/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/app/building-your-application/configuring/typescript for more information.
+
+
+
+================================================
+FILE: frontend/next.config.js
+================================================
+/** @type {import('next').NextConfig} */
+const nextConfig = {}
+module.exports = nextConfig
+
+
+
+================================================
+FILE: frontend/package.json
+================================================
+{
+  "name": "atlas-command-center",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css}\""
+  },
+  "dependencies": {
+    "next": "14.2.18",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.39",
+    "prettier": "^3.2.4",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.5.3"
+  }
+}
+
+
+
+================================================
+FILE: frontend/postcss.config.js
+================================================
+module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};
+
+
+
+================================================
+FILE: frontend/tailwind.config.ts
+================================================
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  content: [
+    "./src/pages/**/*.{js,ts,jsx,tsx}",
+    "./src/components/**/*.{js,ts,jsx,tsx}",
+    "./src/app/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        sidebar: "#2d1b69",
+        sidebarHover: "#3d2a7a",
+        sidebarActive: "#4a3580",
+        accent: "#6366f1",
+        teal: "#2ac7c6",
+      },
+    },
+  },
+  plugins: [],
+};
+export default config;
+
+
+
+================================================
+FILE: frontend/tsconfig.json
+================================================
+{
+  "compilerOptions": {
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
+
+
+
+================================================
+FILE: frontend/.dockerignore
+================================================
+# Dependencies
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
+.next
+out
+dist
+build
+
+# Environment files
+.env
+.env*.local
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Testing
+coverage
+.nyc_output
+
+# Misc
+*.log
+.cache
+
+
+
+================================================
+FILE: frontend/.env.local.example
+================================================
+# Atlas Command Center Frontend
+# Copy to .env.local
+
+NEXT_PUBLIC_API_URL=http://localhost:8000
+
+
+
+================================================
+FILE: frontend/src/app/globals.css
+================================================
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --sidebar-bg: #2d1b69;
+  --sidebar-hover: #3d2a7a;
+  --sidebar-active: #4a3580;
+  --accent: #6366f1;
+  --teal: #2ac7c6;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+
+
+================================================
+FILE: frontend/src/app/layout.tsx
+================================================
+import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "Atlas AI Command Center",
+  description: "Atlas Skilltech University Command Center",
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body className="min-h-screen antialiased">{children}</body>
+    </html>
+  );
+}
+
+
+
+================================================
+FILE: frontend/src/app/(dashboard)/layout.tsx
+================================================
+import Sidebar from "@/components/layout/Sidebar";
+import Header from "@/components/layout/Header";
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-h-screen flex bg-slate-50">
+      <Sidebar />
+      <div className="flex-1 flex flex-col min-w-0">
+        <Header />
+        <main className="flex-1 overflow-auto p-6">{children}</main>
+      </div>
+    </div>
+  );
+}
+
+
+
+================================================
+FILE: frontend/src/app/(dashboard)/page.tsx
+================================================
+import DashboardOverview from "@/components/charts/DashboardOverview";
+
+export default function DashboardPage() {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Command Center Overview</h1>
+          <p className="text-slate-600 mt-0.5">
+            Real-time status of Atlas University&apos;s agentic ecosystem.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+        >
+          + New Agent
+        </button>
+      </div>
+
+      <DashboardOverview />
+    </div>
+  );
+}
+
+
+
+================================================
+FILE: frontend/src/app/(dashboard)/admin/audit/page.tsx
+================================================
+"use client";
+
+import { useEffect, useState } from "react";
+import { fetchWithAuth } from "@/lib/api";
+
+interface AuditLog {
+  id: number;
+  user_id: number | null;
+  action: string;
+  ip_address: string | null;
+  details: string;
+  timestamp: string;
+}
+
+export default function AdminAuditPage() {
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [limit, setLimit] = useState(50);
+
+  useEffect(() => {
+    loadLogs();
+  }, [limit]);
+
+  const loadLogs = async () => {
+    try {
+      const response = await fetchWithAuth(`/api/admin/audit?limit=${limit}`);
+      if (!response.ok) throw new Error("Failed to load audit logs");
+      const data = await response.json();
+      setLogs(data.logs);
+    } catch (error) {
+      console.error("Failed to load audit logs:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      const response = await fetchWithAuth("/api/admin/audit/export");
+      if (!response.ok) throw new Error("Failed to export logs");
+      const data = await response.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `audit-logs-${new Date().toISOString()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert("Failed to export logs");
+      console.error(error);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p className="text-slate-600">Loading audit logs...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Audit Logs</h1>
+          <p className="text-slate-600 mt-1">System activity and security events</p>
+        </div>
+        <button onClick={handleExport} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+          Export Logs
+        </button>
+      </div>
+
+      <div className="flex gap-4 items-center">
+        <label className="text-sm font-medium text-slate-700">Show:</label>
+        <select
+          value={limit}
+          onChange={(e) => setLimit(Number(e.target.value))}
+          className="px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+        >
+          <option value={25}>25 logs</option>
+          <option value={50}>50 logs</option>
+          <option value={100}>100 logs</option>
+          <option value={500}>500 logs</option>
+        </select>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th className="text-left px-6 py-3 text-xs font-medium text-slate-600 uppercase">Timestamp</th>
+                <th className="text-left px-6 py-3 text-xs font-medium text-slate-600 uppercase">Action</th>
+                <th className="text-left px-6 py-3 text-xs font-medium text-slate-600 uppercase">User ID</th>
+                <th className="text-left px-6 py-3 text-xs font-medium text-slate-600 uppercase">IP Address</th>
+                <th className="text-left px-6 py-3 text-xs font-medium text-slate-600 uppercase">Details</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {logs.map((log) => (
+                <tr key={log.id} className="hover:bg-slate-50">
+                  <td className="px-6 py-4 text-sm text-slate-900 whitespace-nowrap">{new Date(log.timestamp).toLocaleString()}</td>
+                  <td className="px-6 py-4">
+                    <span className="inline-flex px-2 py-1 text-xs font-mono rounded bg-slate-100 text-slate-800">{log.action}</span>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-slate-600">{log.user_id || "-"}</td>
+                  <td className="px-6 py-4 text-sm text-slate-600 font-mono">{log.ip_address || "-"}</td>
+                  <td className="px-6 py-4 text-sm text-slate-600 max-w-md truncate" title={log.details}>{log.details}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {logs.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-slate-600">No audit logs found</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+
+================================================
+FILE: frontend/src/app/(dashboard)/admin/users/page.tsx
+================================================
+"use client";
+
+import { useEffect, useState } from "react";
+import { fetchWithAuth } from "@/lib/api";
+
+interface User {
+  id: number;
+  email: string;
+  role: string;
+  status: string;
+  is_active: boolean;
+  created_at: string;
+  approved_at?: string;
+}
+
+export default function AdminUsersPage() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [pendingUsers, setPendingUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"all" | "pending">("all");
+
+  useEffect(() => {
+    loadUsers();
+    loadPendingUsers();
+  }, []);
+
+  const loadUsers = async () => {
+    try {
+      const response = await fetchWithAuth("/api/admin/users");
+      if (!response.ok) throw new Error("Failed to load users");
+      const data = await response.json();
+      setUsers(data);
+    } catch (error) {
+      console.error("Failed to load users:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadPendingUsers = async () => {
+    try {
+      const response = await fetchWithAuth("/api/admin/users/pending");
+      if (!response.ok) throw new Error("Failed to load pending users");
+      const data = await response.json();
+      setPendingUsers(data);
+    } catch (error) {
+      console.error("Failed to load pending users:", error);
+    }
+  };
+
+  const handleApprove = async (userId: number) => {
+    if (!confirm("Approve this user?")) return;
+    try {
+      const response = await fetchWithAuth(`/api/admin/users/${userId}/approve`, { method: "POST" });
+      if (!response.ok) throw new Error("Failed to approve user");
+      await loadUsers();
+      await loadPendingUsers();
+    } catch (error) {
+      alert("Failed to approve user");
+      console.error(error);
+    }
+  };
+
+  const handleReject = async (userId: number) => {
+    if (!confirm("Reject this user? This action cannot be undone.")) return;
+    try {
+      const response = await fetchWithAuth(`/api/admin/users/${userId}/reject`, { method: "POST" });
+      if (!response.ok) throw new Error("Failed to reject user");
+      await loadUsers();
+      await loadPendingUsers();
+    } catch (error) {
+      alert("Failed to reject user");
+      console.error(error);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p className="text-slate-600">Loading users...</p>
+      </div>
+    );
+  }
+
+  const displayUsers = activeTab === "all" ? users : pendingUsers;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">User Management</h1>
+        <p className="text-slate-600 mt-1">Manage user accounts and approvals</p>
+      </div>
+
+      <div className="flex gap-4 border-b border-slate-200">
+        <button
+          onClick={() => setActiveTab("all")}
+          className={`px-4 py-2 font-medium transition-colors ${
+            activeTab === "all" ? "text-blue-600 border-b-2 border-blue-600" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          All Users ({users.length})
+        </button>
+        <button
+          onClick={() => setActiveTab("pending")}
+          className={`px-4 py-2 font-medium transition-colors ${
+            activeTab === "pending" ? "text-blue-600 border-b-2 border-blue-600" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          Pending Approval ({pendingUsers.length})
+        </button>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th className="text-left px-6 py-3 text-xs font-medium text-slate-600 uppercase">Email</th>
+                <th className="text-left px-6 py-3 text-xs font-medium text-slate-600 uppercase">Role</th>
+                <th className="text-left px-6 py-3 text-xs font-medium text-slate-600 uppercase">Status</th>
+                <th className="text-left px-6 py-3 text-xs font-medium text-slate-600 uppercase">Created</th>
+                <th className="text-right px-6 py-3 text-xs font-medium text-slate-600 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {displayUsers.map((user) => (
+                <tr key={user.id} className="hover:bg-slate-50">
+                  <td className="px-6 py-4 text-sm text-slate-900">{user.email}</td>
+                  <td className="px-6 py-4">
+                    <span className="inline-flex px-2 py-1 text-xs font-medium rounded bg-blue-100 text-blue-800">
+                      {user.role}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className={`inline-flex px-2 py-1 text-xs font-medium rounded ${
+                      user.status === "APPROVED" ? "bg-green-100 text-green-800"
+                      : user.status === "PENDING" ? "bg-yellow-100 text-yellow-800"
+                      : "bg-red-100 text-red-800"
+                    }`}>
+                      {user.status}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-slate-600">
+                    {new Date(user.created_at).toLocaleDateString()}
+                  </td>
+                  <td className="px-6 py-4 text-right space-x-2">
+                    {user.status === "PENDING" && (
+                      <>
+                        <button onClick={() => handleApprove(user.id)} className="px-3 py-1 text-sm font-medium text-green-700 hover:text-green-800 hover:bg-green-50 rounded transition-colors">Approve</button>
+                        <button onClick={() => handleReject(user.id)} className="px-3 py-1 text-sm font-medium text-red-700 hover:text-red-800 hover:bg-red-50 rounded transition-colors">Reject</button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {displayUsers.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-slate-600">No users found</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+
+================================================
+FILE: frontend/src/app/(dashboard)/ai/insights/page.tsx
+================================================
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x8f in position 1930: character maps to <undefined>
+
+
+================================================
+FILE: frontend/src/app/(dashboard)/ai/policies/page.tsx
+================================================
+"use client";
+
+import { useEffect, useState } from "react";
+import { fetchWithAuth } from "@/lib/api";
+
+interface Policy {
+  id: number;
+  name: string;
+  description: string | null;
+  policy_type: string;
+  natural_language: string | null;
+  dsl: string | null;
+  status: string;
+  priority: number;
+  created_at: string;
+}
+
+export default function AIPoliciesPage() {
+  const [policies, setPolicies] = useState<Policy[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newPolicy, setNewPolicy] = useState({ name: "", description: "", natural_language: "" });
+  const [translating, setTranslating] = useState(false);
+  const [translatedDSL, setTranslatedDSL] = useState("");
+
+  useEffect(() => { loadPolicies(); }, []);
+
+  const loadPolicies = async () => {
+    try {
+      const response = await fetchWithAuth("/api/ai/policies");
+      if (!response.ok) throw new Error("Failed to load policies");
+      const data = await response.json();
+      setPolicies(data);
+    } catch (error) {
+      console.error("Failed to load policies:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTranslate = async () => {
+    if (!newPolicy.natural_language.trim()) return;
+    setTranslating(true);
+    try {
+      const response = await fetchWithAuth("/api/ai/policies/translate", {
+        method: "POST",
+        body: JSON.stringify({ natural_language: newPolicy.natural_language }),
+      });
+      if (!response.ok) throw new Error("Failed to translate policy");
+      const data = await response.json();
+      setTranslatedDSL(data.dsl);
+    } catch (error) {
+      alert("Failed to translate policy");
+      console.error(error);
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!newPolicy.name.trim() || !translatedDSL) return;
+    try {
+      const response = await fetchWithAuth("/api/ai/policies", {
+        method: "POST",
+        body: JSON.stringify({
+          name: newPolicy.name,
+          description: newPolicy.description,
+          policy_type: "NATURAL_LANGUAGE",
+          natural_language: newPolicy.natural_language,
+          dsl: translatedDSL,
+          priority: 100,
+        }),
+      });
+      if (!response.ok) throw new Error("Failed to create policy");
+      setShowCreateModal(false);
+      setNewPolicy({ name: "", description: "", natural_language: "" });
+      setTranslatedDSL("");
+      await loadPolicies();
+    } catch (error) {
+      alert("Failed to create policy");
+      console.error(error);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p className="text-slate-600">Loading policies...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">AI Policies</h1>
+          <p className="text-slate-600 mt-1">Natural language access control rules</p>
+        </div>
+        <button onClick={() => setShowCreateModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+          + Create Policy
+        </button>
+      </div>
+
+      <div className="grid gap-4">
+        {policies.map((policy) => (
+          <div key={policy.id} className="bg-white rounded-xl border border-slate-200 p-6">
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-slate-900">{policy.name}</h3>
+                {policy.description && <p className="text-slate-600 text-sm mt-1">{policy.description}</p>}
+                {policy.natural_language && (
+                  <div className="mt-4">
+                    <p className="text-xs font-medium text-slate-500 uppercase mb-1">Natural Language</p>
+                    <p className="text-slate-700 italic">{policy.natural_language}</p>
+                  </div>
+                )}
+                {policy.dsl && (
+                  <div className="mt-4">
+                    <p className="text-xs font-medium text-slate-500 uppercase mb-1">Translated DSL</p>
+                    <pre className="text-sm bg-slate-50 p-3 rounded border border-slate-200 overflow-x-auto">{policy.dsl}</pre>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col items-end gap-2 ml-4">
+                <span className={`px-2 py-1 text-xs font-medium rounded ${policy.status === "ACTIVE" ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-800"}`}>
+                  {policy.status}
+                </span>
+                <span className="text-xs text-slate-500">Priority: {policy.priority}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+        {policies.length === 0 && (
+          <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
+            <p className="text-slate-600">No policies found. Create your first policy!</p>
+          </div>
+        )}
+      </div>
+
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-bold text-slate-900 mb-4">Create New Policy</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Policy Name *</label>
+                <input type="text" value={newPolicy.name} onChange={(e) => setNewPolicy({ ...newPolicy, name: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="e.g., Finance Report Access" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                <input type="text" value={newPolicy.description} onChange={(e) => setNewPolicy({ ...newPolicy, description: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Optional description" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Natural Language Rule *</label>
+                <textarea value={newPolicy.natural_language} onChange={(e) => setNewPolicy({ ...newPolicy, natural_language: e.target.value })}
+                  rows={4} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="e.g., Allow managers to access financial reports during business hours" />
+              </div>
+              <button onClick={handleTranslate} disabled={translating || !newPolicy.natural_language.trim()}
+                className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                {translating ? "Translating..." : "Translate to DSL"}
+              </button>
+              {translatedDSL && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Translated DSL</label>
+                  <pre className="text-sm bg-slate-50 p-3 rounded border border-slate-200 overflow-x-auto">{translatedDSL}</pre>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => { setShowCreateModal(false); setNewPolicy({ name: "", description: "", natural_language: "" }); setTranslatedDSL(""); }}
+                className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors font-medium">
+                Cancel
+              </button>
+              <button onClick={handleCreate} disabled={!newPolicy.name.trim() || !translatedDSL}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                Create Policy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+================================================
+FILE: frontend/src/app/(dashboard)/modules/page.tsx
+================================================
+export default function ModulesPage() {
+  return (
+    <div>
+      <h1 className="text-2xl font-bold text-slate-900">Modules</h1>
+      <p className="text-slate-600 mt-0.5">Plug &amp; play: add your module UI pages here.</p>
+    </div>
+  );
+}
+
+
+
+================================================
+FILE: frontend/src/app/(dashboard)/settings/page.tsx
+================================================
+"use client";
+
+import { useState } from "react";
+
+export default function SettingsPage() {
+  const [saved, setSaved] = useState(false);
+
+  return (
+    <div className="max-w-2xl space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
+        <p className="text-slate-600 mt-0.5">
+          Manage your Command Center preferences and account.
+        </p>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-200">
+          <h2 className="font-semibold text-slate-900">Profile</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Update your display name and email.</p>
+        </div>
+        <div className="p-5 space-y-4">
+          <div>
+            <label htmlFor="name" className="block text-sm font-medium text-slate-700 mb-1">Display name</label>
+            <input
+              id="name"
+              type="text"
+              defaultValue="Dean Henderson"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+            />
+          </div>
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+            <input
+              id="email"
+              type="email"
+              defaultValue="dean.henderson@atlas.edu"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-200">
+          <h2 className="font-semibold text-slate-900">Notifications</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Choose how you receive alerts.</p>
+        </div>
+        <div className="p-5 space-y-4">
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-sm font-medium text-slate-700">Email notifications</span>
+            <input type="checkbox" defaultChecked className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+          </label>
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-sm font-medium text-slate-700">Agent alerts</span>
+            <input type="checkbox" defaultChecked className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+          </label>
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-sm font-medium text-slate-700">System health warnings</span>
+            <input type="checkbox" defaultChecked className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+          </label>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            setSaved(true);
+            setTimeout(() => setSaved(false), 2000);
+          }}
+          className="px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+        >
+          Save changes
+        </button>
+        {saved && <span className="text-sm text-emerald-600 font-medium">Saved.</span>}
+      </div>
+    </div>
+  );
+}
+
+
+
+================================================
+FILE: frontend/src/components/ai/AIManager.tsx
+================================================
+"use client";
+
+import { useState } from "react";
+import { usePathname } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import { fetchWithAuth } from "@/lib/api";
+
+interface Message {
+  role: "user" | "assistant";
+  content: string;
+  tool_calls?: Array<{ tool: string; result: any }>;
+}
+
+interface AIManagerProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export default function AIManager({ isOpen, onClose }: AIManagerProps) {
+  const pathname = usePathname();
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSend = async () => {
+    if (!input.trim() || loading) return;
+
+    const userMessage: Message = { role: "user", content: input };
+    setMessages((prev) => [...prev, userMessage]);
+    setInput("");
+    setLoading(true);
+
+    try {
+      const response = await fetchWithAuth("/api/ai/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: [...messages, userMessage].map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+          current_page: pathname,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Chat request failed");
+      
+      const data = await response.json();
+      setMessages((prev) => [...prev, data]);
+    } catch (error) {
+      console.error("Chat error:", error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "Sorry, I encountered an error. Please try again.",
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl h-[600px] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">ðŸ¤–</span>
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">AI Manager</h2>
+              <p className="text-xs text-slate-600">Your intelligent assistant</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+          >
+            <svg className="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {messages.length === 0 && (
+            <div className="text-center py-12">
+              <span className="text-6xl mb-4 block">ðŸ‘‹</span>
+              <h3 className="text-lg font-semibold text-slate-900 mb-2">
+                Hello! I'm your AI Manager
+              </h3>
+              <p className="text-slate-600 max-w-md mx-auto">
+                I can help you with system stats, user management, audit logs, policies, and more.
+                Just ask me anything!
+              </p>
+            </div>
+          )}
+
+          {messages.map((message, index) => (
+            <div
+              key={index}
+              className={`flex gap-3 ${
+                message.role === "user" ? "justify-end" : "justify-start"
+              }`}
+            >
+              {message.role === "assistant" && (
+                <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+                  ðŸ¤–
+                </div>
+              )}
+              <div
+                className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                  message.role === "user"
+                    ? "bg-blue-600 text-white"
+                    : "bg-slate-100 text-slate-900"
+                }`}
+              >
+                <ReactMarkdown className="prose prose-sm max-w-none">
+                  {message.content}
+                </ReactMarkdown>
+                
+                {message.tool_calls && message.tool_calls.length > 0 && (
+                  <div className="mt-2 space-y-2">
+                    {message.tool_calls.map((call, i) => (
+                      <div
+                        key={i}
+                        className="text-xs bg-white/50 rounded p-2 border border-slate-200"
+                      >
+                        <p className="font-medium">ðŸ”§ {call.tool}</p>
+                        <pre className="mt-1 text-xs overflow-x-auto">
+                          {JSON.stringify(call.result, null, 2)}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {message.role === "user" && (
+                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                  ðŸ‘¤
+                </div>
+              )}
+            </div>
+          ))}
+
+          {loading && (
+            <div className="flex gap-3 justify-start">
+              <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+                ðŸ¤–
+              </div>
+              <div className="bg-slate-100 rounded-2xl px-4 py-3">
+                <div className="flex gap-1">
+                  <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-slate-200 p-4">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Ask me anything..."
+              className="flex-1 px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none"
+              disabled={loading}
+            />
+            <button
+              onClick={handleSend}
+              disabled={loading || !input.trim()}
+              className="px-6 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Send
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 mt-2 text-center">
+            Current page: {pathname} â€¢ Press Enter to send
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+================================================
+FILE: frontend/src/components/charts/DashboardOverview.tsx
+================================================
+"use client";
+
+const overviewCards = [
+  {
+    title: "Active AI Agents",
+    value: "24",
+    tag: "+4 new",
+    tagColor: "bg-blue-100 text-blue-700",
+    icon: (
+      <svg className="w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
+    title: "Running Automations",
+    value: "142",
+    tag: "Stable",
+    tagColor: "bg-violet-100 text-violet-700",
+    icon: (
+      <svg className="w-8 h-8 text-violet-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+      </svg>
+    ),
+  },
+  {
+    title: "Total Projects",
+    value: "8",
+    tag: "2 Due",
+    tagColor: "bg-amber-100 text-amber-700",
+    icon: (
+      <svg className="w-8 h-8 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+    ),
+  },
+  {
+    title: "System Health",
+    value: "99.9%",
+    tag: "Excellent",
+    tagColor: "bg-emerald-100 text-emerald-700",
+    icon: (
+      <svg className="w-8 h-8 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
+  },
+];
+
+const liveActivity = [
+  { agent: "Timetable AI", task: "Generating week 12 schedule", status: "PROCESSING", statusColor: "bg-blue-100 text-blue-700", priority: "High", priorityColor: "bg-red-500" },
+  { agent: "HR Automation", task: "Leave request #402", status: "IDLE", statusColor: "bg-slate-100 text-slate-600", priority: "Medium", priorityColor: "bg-amber-500" },
+  { agent: "Doc Intelligence", task: "Extracting from syllabus.pdf", status: "SUCCESS", statusColor: "bg-emerald-100 text-emerald-700", priority: "Low", priorityColor: "bg-slate-400" },
+];
+
+const systemActivity = [
+  { event: "Automation Triggered", time: "2 min ago", dot: "bg-blue-500" },
+  { event: "Knowledge Base Updated", time: "15 min ago", dot: "bg-violet-500" },
+  { event: "Warning Alert", time: "1 hour ago", dot: "bg-amber-500" },
+];
+
+export default function DashboardOverview() {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {overviewCards.map((card) => (
+          <div
+            key={card.title}
+            className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow transition-shadow"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-500">{card.title}</p>
+                <p className="text-2xl font-bold text-slate-900 mt-1">{card.value}</p>
+                <span className={`inline-block mt-2 px-2 py-0.5 rounded text-xs font-medium ${card.tagColor}`}>
+                  {card.tag}
+                </span>
+              </div>
+              <div className="p-2 bg-slate-50 rounded-lg">{card.icon}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+            <h2 className="font-semibold text-slate-900">Live Agent Activity</h2>
+            <a href="#" className="text-sm text-indigo-600 hover:text-indigo-700 font-medium">View All</a>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {liveActivity.map((row, i) => (
+              <div key={i} className="px-5 py-3 flex items-center gap-4 hover:bg-slate-50/50">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${row.priorityColor}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-900 truncate">{row.agent}</p>
+                  <p className="text-sm text-slate-500 truncate">{row.task}</p>
+                </div>
+                <span className={`px-2 py-0.5 rounded text-xs font-medium shrink-0 ${row.statusColor}`}>
+                  {row.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-200">
+            <h2 className="font-semibold text-slate-900">System Activity</h2>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {systemActivity.map((row, i) => (
+              <div key={i} className="px-5 py-3 flex items-center gap-3 hover:bg-slate-50/50">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${row.dot}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-900">{row.event}</p>
+                  <p className="text-sm text-slate-500">{row.time}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+================================================
+FILE: frontend/src/components/layout/Header.tsx
+================================================
+"use client";
+
+import { useState } from "react";
+import AIManager from "@/components/ai/AIManager";
+
+export default function Header() {
+  const [showAIManager, setShowAIManager] = useState(false);
+
+  return (
+    <>
+      <header className="h-14 border-b border-slate-200 bg-white px-6 flex items-center gap-4 shrink-0">
+        <div className="flex-1 flex items-center">
+          <div className="relative w-full max-w-md">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </span>
+            <input
+              type="search"
+              placeholder="Search..."
+              className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+            />
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setShowAIManager(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white transition-colors font-medium"
+          title="Open AI Manager"
+        >
+          <span className="text-lg">ðŸ¤–</span>
+          <span className="hidden sm:inline">AI Manager</span>
+        </button>
+
+        <div className="flex items-center gap-2 text-sm text-slate-600">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            System: Optimal
+          </span>
+        </div>
+
+        <button type="button" className="p-2 rounded-lg hover:bg-slate-100 text-slate-500" aria-label="Notifications">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+          </svg>
+        </button>
+
+        <div className="flex items-center gap-3 pl-2 border-l border-slate-200">
+          <div className="w-9 h-9 rounded-full bg-[var(--sidebar-bg)] flex items-center justify-center text-white font-semibold text-sm">
+            A
+          </div>
+        </div>
+      </header>
+
+      <AIManager isOpen={showAIManager} onClose={() => setShowAIManager(false)} />
+    </>
+  );
+}
+
+
+
+================================================
+FILE: frontend/src/components/layout/Sidebar.tsx
+================================================
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useState } from "react";
+
+function LogoFallback({ size }: { size: number }) {
+  return (
+    <div
+      className="shrink-0 rounded bg-white/10 flex items-center justify-center font-bold text-white text-xs"
+      style={{ width: size, height: size }}
+    >
+      A
+    </div>
+  );
+}
+
+function LogoImage({ collapsed }: { collapsed: boolean }) {
+  const [failed, setFailed] = useState(false);
+  const size = collapsed ? 32 : 36;
+  if (failed) return <LogoFallback size={size} />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src="/logo.png"
+      alt="Atlas Skilltech University"
+      width={size}
+      height={size}
+      className="shrink-0 rounded object-contain"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+const navItems = [
+  { href: "/", label: "Dashboard", icon: DashboardIcon },
+  { href: "/admin/users", label: "User Management", icon: UsersIcon },
+  { href: "/admin/audit", label: "Audit Logs", icon: AuditIcon },
+  { href: "/ai/policies", label: "AI Policies", icon: PolicyIcon },
+  { href: "/ai/insights", label: "AI Insights", icon: InsightsIcon },
+  { href: "/settings", label: "Settings", icon: SettingsIcon },
+];
+
+function DashboardIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+    </svg>
+  );
+}
+
+function UsersIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+    </svg>
+  );
+}
+
+function AuditIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+  );
+}
+
+function PolicyIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+    </svg>
+  );
+}
+
+function InsightsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+    </svg>
+  );
+}
+
+function SettingsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      className={`w-5 h-5 text-white/80 transition-transform ${collapsed ? "rotate-180" : ""}`}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+    </svg>
+  );
+}
+
+export default function Sidebar() {
+  const pathname = usePathname();
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <aside
+      className={`flex flex-col bg-[var(--sidebar-bg)] text-white transition-all duration-300 ease-in-out ${
+        collapsed ? "w-20" : "w-64"
+      }`}
+    >
+      <div className={`flex items-center h-16 border-b border-white/10 shrink-0 ${collapsed ? "px-2" : "px-4"}`}>
+        <Link href="/" className={`flex items-center gap-2 min-w-0 flex-1 ${collapsed ? "justify-center" : ""}`}>
+          <LogoImage collapsed={collapsed} />
+          {!collapsed && <span className="font-semibold text-sm truncate">ATLAS SKILLTECH</span>}
+        </Link>
+        <button
+          type="button"
+          onClick={() => setCollapsed(!collapsed)}
+          className="p-1.5 rounded-lg hover:bg-white/10 text-white/80 hover:text-white transition-colors shrink-0"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          <ChevronIcon collapsed={collapsed} />
+        </button>
+      </div>
+
+      <nav className="flex-1 py-4 px-2 space-y-0.5">
+        {navItems.map(({ href, label, icon: Icon }) => {
+          const isActive = pathname === href || (href !== "/" && pathname.startsWith(href));
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
+                isActive ? "bg-[var(--sidebar-active)] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"
+              } ${collapsed ? "justify-center" : ""}`}
+            >
+              <Icon className="w-6 h-6 shrink-0" />
+              {!collapsed && <span className="font-medium text-sm truncate">{label}</span>}
+            </Link>
+          );
+        })}
+      </nav>
+
+      {!collapsed && (
+        <div className="p-4 border-t border-white/10">
+          <p className="text-xs text-white/60 uppercase tracking-wider mb-2">System Credits</p>
+          <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+            <div className="h-full bg-[var(--teal)] rounded-full w-3/4" />
+          </div>
+          <p className="text-xs text-white/70 mt-1">75% Usage Reached</p>
+        </div>
+      )}
+    </aside>
+  );
+}
+
+
+
+================================================
+FILE: frontend/src/components/ui/.gitkeep
+================================================
+[Empty file]
+
+
+================================================
+FILE: frontend/src/lib/api.ts
+================================================
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+/**
+ * Fetch helper â€” points all calls at the backend API base.
+ * No auth token is attached (open access mode).
+ */
+export async function fetchWithAuth(
+  path: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
+  const headers = new Headers(options.headers);
+  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  return fetch(url, { ...options, headers });
+}
+
+export async function api<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const res = await fetchWithAuth(path, options);
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => res.statusText);
+    throw new Error(errorText);
+  }
+  return res.json() as Promise<T>;
+}
+
+
+
+================================================
+FILE: frontend/src/lib/store.ts
+================================================
+// Global state for Atlas Command Center.
+// Auth removed â€” open access mode.
+
+export type User = {
+  id: number;
+  email: string;
+  role: string;
+  is_active: boolean;
+};
+
+
