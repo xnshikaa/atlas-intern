@@ -1,0 +1,51 @@
+interactive rebase in progress; onto f389d88
+Last command done (1 command done):
+   pick 51b41e1 # Update frontend with .env.example, keep .env.local untracked
+No commands remaining.
+You are currently rebasing branch 'main' on 'f389d88'.
+  (fix conflicts and then run "git rebase --continue")
+  (use "git rebase --skip" to skip this patch)
+  (use "git rebase --abort" to check out the original branch)
+
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+	new file:   frontend/.env.example
+	new file:   frontend/src/app/(dashboard)/add-subject/page.tsx
+	new file:   frontend/src/app/(dashboard)/ai-assistant/page.tsx
+	new file:   frontend/src/app/(dashboard)/alerts/page.tsx
+	new file:   frontend/src/app/(dashboard)/cia-planner/page.tsx
+	new file:   frontend/src/app/(dashboard)/holidays/page.tsx
+	new file:   frontend/src/app/(dashboard)/logs/page.tsx
+	new file:   frontend/src/app/(dashboard)/planner/page.tsx
+	new file:   frontend/src/app/(dashboard)/predictions/page.tsx
+	new file:   frontend/src/app/(dashboard)/subjects/[id]/page.tsx
+	new file:   frontend/src/app/(dashboard)/syllabus/page.tsx
+	new file:   frontend/src/app/api/chat/route.ts
+	new file:   frontend/src/components/editor/BlockEditor.tsx
+	new file:   frontend/src/components/layout/TopHeader.tsx
+	new file:   frontend/src/components/planner/WeeklyGrid.tsx
+	new file:   frontend/src/components/ui/CinematicTransition.tsx
+	new file:   frontend/src/components/ui/OnboardingFlow.tsx
+	new file:   frontend/src/components/ui/StartupSequence.tsx
+	new file:   git_status.txt
+	new file:   git_status2.txt
+
+Unmerged paths:
+  (use "git restore --staged <file>..." to unstage)
+  (use "git add/rm <file>..." as appropriate to mark resolution)
+	both modified:   backend/app/main.py
+	both modified:   backend/app/models/user.py
+	both modified:   digest.txt
+	both modified:   docker-compose.yml
+	deleted by us:   frontend/package-lock.json
+	deleted by us:   frontend/package.json
+	deleted by us:   frontend/src/app/(dashboard)/layout.tsx
+	deleted by us:   frontend/src/app/(dashboard)/page.tsx
+	deleted by us:   frontend/src/components/layout/Header.tsx
+	deleted by us:   frontend/src/components/layout/Sidebar.tsx
+	deleted by us:   frontend/tailwind.config.ts
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	git_pull_status.txt
+
